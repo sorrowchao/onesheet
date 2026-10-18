@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# PyInstaller 构建产物
+build/
+dist/
+
+# 本地运行数据（含 API Key、用户模板、日志、图标）
+data/
+
+# 真实样例 Excel（公司业务数据，不公开）
+test/
+
+# 本地工具设置
+.claude/settings.local.json
+
+# 系统文件
+Thumbs.db
+desktop.ini
+.DS_Store
