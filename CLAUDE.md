@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **一表通 (OneSheet)** — Windows desktop GUI (PySide6) for extracting "form (label:value)" data out of Excel / Word (`.docx`) / PDF / CSV files into summary tables, then writing edited summary values back into the source **Excel** files. Single-user, local. Only the `表单（标签:值）` data shape is supported. Word/PDF/CSV are read-only inputs (never written back).
 
-Docs: `PRD.md` (requirements), `M1技术方案.md` (technical design — §4 template JSON schema, §5.2 detection rules), `使用说明.txt` (user guide), `CHANGELOG.md` (release notes; current version `app.__version__` = 2.0, shown in the About dialog).
+Docs: `README.md` (project overview / quick start), `PRD.md` (requirements), `M1技术方案.md` (technical design — §4 template JSON schema, §5.2 detection rules), `使用说明.txt` (user guide), `CHANGELOG.md` (release notes; current version `app.__version__` = 2.0, shown in the About dialog).
 
 ## Commands
 
