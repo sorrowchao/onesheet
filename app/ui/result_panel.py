@@ -283,6 +283,7 @@ class ResultPanel(QTabWidget):
             finally:
                 w.blockSignals(False)
             w.resizeColumnsToContents()
+            w.resizeRowsToContents()  # 多行单元格（如同类行堆叠）需要撑高才看得全
             w.reset_history()
             self.addTab(w, name)
 

@@ -1,22 +1,28 @@
 """本地设置存取（data/settings.json）。
 
-保存 DeepSeek API Key 与界面主题名。单人本地工具，明文存盘可接受；
-支持 `DEEPSEEK_API_KEY` 环境变量覆盖文件里的 key。
+保存 AI 接口配置（OpenAI 兼容协议的 Key / 地址 / 模型）与界面主题名。
+单人本地工具，明文存盘可接受；环境变量优先于文件：
+`DEEPSEEK_API_KEY` / `OPENAI_API_KEY`（Key）、`OPENAI_BASE_URL`（地址）、
+`OPENAI_MODEL`（模型）、`OPENAI_VISION_MODEL`（扫描件用的视觉模型）。
 """
 import json
 import os
 from pathlib import Path
 
-from app.paths import data_dir
+from app.paths import data_dir, resource_dir
 
 # 打包后（onefile）由 app.paths 解析 exe 附近的数据根目录，避免设置丢失。
 DEFAULT_SETTINGS_DIR = data_dir()
 
 _API_KEY_FIELD = "deepseek_api_key"
+_API_URL_FIELD = "ai_api_url"
+_MODEL_FIELD = "ai_model"
+_VISION_MODEL_FIELD = "ai_vision_model"
 _THEME_FIELD = "theme"
 _ICON_FIELD = "icon"
 _WINDOW_FIELD = "window_state"
 _LAST_IMPORT_DIR_FIELD = "last_import_dir"
+_FOLDER_IMPORT_FIELD = "folder_import_options"
 
 DEFAULT_ICON = "1"
 _ICON_EXTS = {".png", ".ico", ".svg", ".jpg", ".jpeg", ".bmp"}
@@ -48,8 +54,9 @@ def save_settings(d: dict, dir_path: Path | None = None) -> None:
 
 
 def env_api_key() -> str:
-    """环境变量 `DEEPSEEK_API_KEY` 的值（无则空串）。"""
-    return (os.environ.get("DEEPSEEK_API_KEY") or "").strip()
+    """环境变量里的 Key：`DEEPSEEK_API_KEY` 优先，其次 `OPENAI_API_KEY`。"""
+    return (os.environ.get("DEEPSEEK_API_KEY")
+            or os.environ.get("OPENAI_API_KEY") or "").strip()
 
 
 def get_stored_api_key(dir_path: Path | None = None) -> str:
@@ -59,8 +66,91 @@ def get_stored_api_key(dir_path: Path | None = None) -> str:
 
 
 def get_api_key(dir_path: Path | None = None) -> str:
-    """优先取环境变量 `DEEPSEEK_API_KEY`，否则读文件。无则返回空串。"""
+    """优先取环境变量，否则读文件。无则返回空串。"""
     return env_api_key() or get_stored_api_key(dir_path)
+
+
+def env_ai_api_url() -> str:
+    """环境变量 `OPENAI_BASE_URL` 的值（无则空串）。"""
+    return (os.environ.get("OPENAI_BASE_URL") or "").strip()
+
+
+def get_stored_ai_api_url(dir_path: Path | None = None) -> str:
+    """只读设置文件里的 API 地址（忽略环境变量）。"""
+    value = load_settings(dir_path).get(_API_URL_FIELD)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def get_ai_api_url(dir_path: Path | None = None) -> str:
+    """优先取环境变量 `OPENAI_BASE_URL`，否则读文件；无则空串（调用方用默认）。"""
+    return env_ai_api_url() or get_stored_ai_api_url(dir_path)
+
+
+def set_ai_api_url(url: str, dir_path: Path | None = None) -> None:
+    """写入 API 地址；空串则清除。保留文件里其他键。"""
+    data = load_settings(dir_path)
+    value = (url or "").strip()
+    if value:
+        data[_API_URL_FIELD] = value
+    else:
+        data.pop(_API_URL_FIELD, None)
+    save_settings(data, dir_path)
+
+
+def env_ai_model() -> str:
+    """环境变量 `OPENAI_MODEL` 的值（无则空串）。"""
+    return (os.environ.get("OPENAI_MODEL") or "").strip()
+
+
+def get_stored_ai_model(dir_path: Path | None = None) -> str:
+    """只读设置文件里的模型名（忽略环境变量）。"""
+    value = load_settings(dir_path).get(_MODEL_FIELD)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def get_ai_model(dir_path: Path | None = None) -> str:
+    """优先取环境变量 `OPENAI_MODEL`，否则读文件；无则空串（调用方用默认）。"""
+    return env_ai_model() or get_stored_ai_model(dir_path)
+
+
+def set_ai_model(model: str, dir_path: Path | None = None) -> None:
+    """写入模型名；空串则清除。保留文件里其他键。"""
+    data = load_settings(dir_path)
+    value = (model or "").strip()
+    if value:
+        data[_MODEL_FIELD] = value
+    else:
+        data.pop(_MODEL_FIELD, None)
+    save_settings(data, dir_path)
+
+
+def env_ai_vision_model() -> str:
+    """环境变量 `OPENAI_VISION_MODEL` 的值（无则空串）。"""
+    return (os.environ.get("OPENAI_VISION_MODEL") or "").strip()
+
+
+def get_stored_ai_vision_model(dir_path: Path | None = None) -> str:
+    """只读设置文件里的视觉模型名（忽略环境变量）。"""
+    value = load_settings(dir_path).get(_VISION_MODEL_FIELD)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def get_ai_vision_model(dir_path: Path | None = None) -> str:
+    """视觉模型：环境变量 → 文件 → 回退普通模型；用于 PDF 扫描页。"""
+    return (env_ai_vision_model()
+            or get_stored_ai_vision_model(dir_path)
+            or get_ai_model(dir_path))
+
+
+def set_ai_vision_model(model: str, dir_path: Path | None = None) -> None:
+    """写入视觉模型名；空串则清除（此后沿用普通模型）。保留其他键。"""
+    data = load_settings(dir_path)
+    value = (model or "").strip()
+    if value:
+        data[_VISION_MODEL_FIELD] = value
+    else:
+        data.pop(_VISION_MODEL_FIELD, None)
+    save_settings(data, dir_path)
 
 
 def set_api_key(key: str, dir_path: Path | None = None) -> None:
@@ -121,11 +211,33 @@ def set_last_import_dir(path: str, dir_path: Path | None = None) -> None:
     save_settings(data, dir_path)
 
 
+def get_folder_import_options(dir_path: Path | None = None) -> dict:
+    """返回上次「导入文件夹」的筛选选项；无/非法返回空 dict。"""
+    value = load_settings(dir_path).get(_FOLDER_IMPORT_FIELD)
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def set_folder_import_options(options: dict, dir_path: Path | None = None) -> None:
+    """保存「导入文件夹」筛选选项；空 dict 则清除。保留其他键。"""
+    data = load_settings(dir_path)
+    if options:
+        data[_FOLDER_IMPORT_FIELD] = dict(options)
+    else:
+        data.pop(_FOLDER_IMPORT_FIELD, None)
+    save_settings(data, dir_path)
+
+
 # --- 应用图标（data/icons/ 下的文件，用户可选）-------------------------------
 
 def icons_dir(dir_path: Path | None = None) -> Path:
+    """用户图标目录（data/icons）：可选，用来覆盖/补充内置图标。"""
     d = Path(dir_path) if dir_path is not None else DEFAULT_SETTINGS_DIR
     return d / "icons"
+
+
+def bundled_icons_dir() -> Path:
+    """随程序打包的内置图标目录（app/icons）。"""
+    return resource_dir() / "app" / "icons"
 
 
 def _icon_sort_key(path: Path):
@@ -133,16 +245,22 @@ def _icon_sort_key(path: Path):
     return (0, int(stem), "") if stem.isdigit() else (1, 0, stem.lower())
 
 
-def available_icons(dir_path: Path | None = None) -> list[Path]:
-    """列出 data/icons/ 下可用的图标文件（数字名按数值排序）。"""
-    d = icons_dir(dir_path)
+def _icon_files(d: Path) -> list[Path]:
     if not d.exists():
         return []
-    return sorted(
-        (p for p in d.iterdir()
-         if p.is_file() and p.suffix.lower() in _ICON_EXTS),
-        key=_icon_sort_key,
-    )
+    return [p for p in d.iterdir()
+            if p.is_file() and p.suffix.lower() in _ICON_EXTS]
+
+
+def available_icons(dir_path: Path | None = None) -> list[Path]:
+    """列出可用图标：内置 app/icons + 用户 data/icons（同名时用户覆盖）。
+
+    数字名按数值排序，数字名在前、其余按名称排序。
+    """
+    merged = {p.stem: p for p in _icon_files(bundled_icons_dir())}
+    for p in _icon_files(icons_dir(dir_path)):
+        merged[p.stem] = p
+    return sorted(merged.values(), key=_icon_sort_key)
 
 
 def resolve_icon_name(name: str | None = None,

@@ -1,11 +1,13 @@
 """FilePanel 单元测试（勾选 / 全选 / 移除，离屏）。"""
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
-from app.ui.file_panel import FilePanel
+from app.ui.file_panel import FilePanel, collect_input_files
 
 # 必须在构造任何 QWidget 之前创建 QApplication。
 _app = QApplication.instance() or QApplication(sys.argv)
@@ -146,6 +148,52 @@ class FilePanelTest(unittest.TestCase):
         self.panel.btn_import_folder.click()
         self.assertEqual(files_fired, [True])
         self.assertEqual(folder_fired, [True])
+
+
+class CollectInputFilesTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        (self.root / "z.xlsx").write_bytes(b"x")
+        (self.root / "B.xls").write_bytes(b"x")
+        (self.root / "UP.XLSX").write_bytes(b"x")
+        (self.root / "note.txt").write_text("x", encoding="utf-8")
+        (self.root / "old.doc").write_bytes(b"x")
+        (self.root / "doc.docx").write_bytes(b"x")
+        (self.root / "scan.pdf").write_bytes(b"x")
+        (self.root / "data.csv").write_text("a,b", encoding="utf-8")
+        (self.root / "a_dir").mkdir()
+        (self.root / "a_dir" / "a.xlsx").write_bytes(b"x")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _rel(self, files):
+        return [Path(f).relative_to(self.root).as_posix() for f in files]
+
+    def test_dir_expansion_keeps_legacy_order(self):
+        files = collect_input_files([str(self.root)])
+        self.assertEqual(self._rel(files), [
+            "a_dir/a.xlsx", "B.xls", "data.csv", "doc.docx", "scan.pdf",
+            "UP.XLSX", "z.xlsx",
+        ])
+
+    def test_dedupe_direct_and_via_directory(self):
+        files = collect_input_files([str(self.root / "z.xlsx"), str(self.root)])
+        self.assertEqual(len(files), len(set(files)))
+        self.assertEqual(self._rel(files)[0], "z.xlsx")
+
+    def test_missing_and_unsupported_ignored(self):
+        files = collect_input_files([str(self.root / "missing.xlsx"),
+                                     str(self.root / "note.txt"),
+                                     str(self.root / "old.doc")])
+        self.assertEqual(files, [])
+
+    def test_document_formats_accepted_directly(self):
+        files = collect_input_files([str(self.root / "doc.docx"),
+                                     str(self.root / "scan.pdf"),
+                                     str(self.root / "data.csv")])
+        self.assertEqual(self._rel(files), ["doc.docx", "scan.pdf", "data.csv"])
 
 
 if __name__ == "__main__":

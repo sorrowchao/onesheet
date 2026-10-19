@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from .models import FieldMapping, OutputTable, ResultTable
-from .reader import detect_format, read_excel
+from .reader import EXCEL_FORMATS, detect_format, read_excel
 
 
 def read_summary_xlsx(path: str) -> ResultTable:
@@ -140,6 +140,12 @@ def _plan_files(files: list[str], output_table: OutputTable,
                     (path, f"目标模板里没有与匹配列「{'、'.join(missing_targets)}」对应的定位字段"))
                 continue
 
+            # 防御：反向写入只支持 Excel（Word / PDF / CSV 只读）。
+            if detect_format(path) not in EXCEL_FORMATS:
+                plan["errors"].append(
+                    (path, "不是 Excel 文件，反向写入仅支持 .xlsx / .xls / .xlsm"))
+                continue
+
             sheets = read_excel(path)
             sheet, sheet_idx = _locate_sheet(sheets, output_table.sheet.sheet_keyword)
             if sheet is None:
@@ -247,6 +253,8 @@ def _save(path: str, sheet, sheet_idx: int,
           writes: dict[tuple[int, int], Any], out_dir: Path) -> str:
     """按真实格式把单元格写回，输出到 out_dir，返回输出路径。"""
     fmt = detect_format(path)
+    if fmt not in EXCEL_FORMATS:
+        raise ValueError(f"不是 Excel 文件，无法反向写入：{path}")
     stem = Path(path).stem
     out_path = out_dir / (stem + (".xlsx" if fmt == "xlsx" else ".xls"))
     if fmt == "xlsx":

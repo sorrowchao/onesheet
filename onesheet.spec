@@ -1,13 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller 打包配置：onefile + 无控制台 GUI。
 
+from PyInstaller.utils.hooks import collect_dynamic_libs
+
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
     datas=[('app/ui/assets/check.svg', 'app/ui/assets'),
+           # 内置应用图标：随 exe 打包，换电脑后仍可在「视图 → 应用图标」中选择。
+           ('app/icons', 'app/icons'),
            ('使用说明.txt', '.')],
-    hiddenimports=['openpyxl', 'xlrd', 'xlwt', 'xlutils'],
+    hiddenimports=['openpyxl', 'xlrd', 'xlwt', 'xlutils',
+                   # Word / PDF 输入
+                   'docx', 'pdfplumber', 'pdfminer', 'pypdfium2', 'PIL'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -65,6 +71,9 @@ def _is_dropped(entry):
 a.binaries = [x for x in a.binaries if not _is_dropped(x)]
 a.datas = [x for x in a.datas if not _is_dropped(x)]
 
+# pypdfium2 的原生 DLL 由 hook 之外的动态加载引入，显式收集（重复项由 PyInstaller 去重）。
+a.binaries += collect_dynamic_libs('pypdfium2')
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
@@ -74,6 +83,7 @@ exe = EXE(
     a.datas,
     [],
     name='onesheet',
+    icon='app/ui/assets/onesheet.ico',   # exe 文件/任务栏默认图标
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

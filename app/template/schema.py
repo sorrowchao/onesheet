@@ -4,7 +4,7 @@ from dataclasses import asdict
 from app.core.models import (ExtractTemplate, FieldMapping, OutputTable,
                              SheetConfig)
 
-VALID_SOURCE = {"kv"}
+VALID_SOURCE = {"kv", "filename"}
 
 
 # --------------------------------------------------------------------------

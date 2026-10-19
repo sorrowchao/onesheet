@@ -39,3 +39,14 @@ def base_dir() -> Path:
 
 def data_dir() -> Path:
     return base_dir() / "data"
+
+
+def resource_dir() -> Path:
+    """只读资源根目录（`app/icons` 等随程序打包的资源所在处）。
+
+    源码运行：项目根目录；打包运行：PyInstaller 的 onefile 解包目录
+    （`sys._MEIPASS`），这样资源不必散落在 exe 旁边。
+    """
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+    return _source_base()

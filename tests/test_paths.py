@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from app import paths
 
@@ -46,6 +47,15 @@ class FrozenBaseTest(unittest.TestCase):
         self.assertFalse(getattr(sys, "frozen", False))
         self.assertEqual(paths.data_dir(),
                          Path(__file__).resolve().parent.parent / "data")
+
+    def test_source_resource_dir_is_project_root(self):
+        self.assertEqual(paths.resource_dir(),
+                         Path(__file__).resolve().parent.parent)
+
+    def test_frozen_resource_dir_uses_meipass(self):
+        with mock.patch.object(sys, "frozen", True, create=True), \
+                mock.patch.object(sys, "_MEIPASS", str(self.root), create=True):
+            self.assertEqual(paths.resource_dir(), self.root.resolve())
 
 
 if __name__ == "__main__":

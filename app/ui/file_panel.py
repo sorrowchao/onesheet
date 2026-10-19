@@ -6,21 +6,27 @@ from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QPushButton, QVBoxLayout,
                                QWidget)
 
-EXCEL_EXTS = {".xlsx", ".xls", ".xlsm"}
+from app.core.folder_scan import INPUT_EXTS, SORT_PATH, scan_folder
 
 
-def collect_excel_files(paths: list[str]) -> list[str]:
-    """展开传入的文件/文件夹，收集 Excel 文件路径（去重）。"""
+def collect_input_files(paths: list[str]) -> list[str]:
+    """展开传入的文件/文件夹，收集受支持的输入文件路径（去重）。"""
     result: list[str] = []
+    seen: set[str] = set()
+
+    def add(path: str):
+        if path not in seen:
+            seen.add(path)
+            result.append(path)
+
     for p in paths:
-        p = Path(p)
-        if p.is_file():
-            if p.suffix.lower() in EXCEL_EXTS and str(p) not in result:
-                result.append(str(p))
-        elif p.is_dir():
-            for f in sorted(p.rglob("*")):
-                if f.is_file() and f.suffix.lower() in EXCEL_EXTS and str(f) not in result:
-                    result.append(str(f))
+        path = Path(p)
+        if path.is_file():
+            if path.suffix.lower() in INPUT_EXTS:
+                add(str(path))
+        elif path.is_dir():
+            for f in scan_folder(path, recursive=True, sort_by=SORT_PATH):
+                add(f)
     return result
 
 
@@ -28,7 +34,7 @@ class FilePanel(QWidget):
     file_activated = Signal(str)  # 双击某个文件路径
     import_files_requested = Signal()   # 请求导入文件
     import_folder_requested = Signal()  # 请求导入文件夹
-    files_dropped = Signal(list)        # 拖入并已加入列表的 Excel 文件
+    files_dropped = Signal(list)        # 拖入并已加入列表的输入文件
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -103,7 +109,7 @@ class FilePanel(QWidget):
             return
         paths = [u.toLocalFile() for u in event.mimeData().urls()
                  if u.isLocalFile()]
-        files = collect_excel_files(paths)
+        files = collect_input_files(paths)
         event.acceptProposedAction()
         if files:
             self.add_files(files)

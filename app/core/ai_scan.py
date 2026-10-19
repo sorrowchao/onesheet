@@ -1,4 +1,7 @@
-"""AI 扫描表单：把 sheet 内容发给 DeepSeek，取回「标签 → 值」映射。
+"""AI 扫描表单：把 sheet 内容发给 OpenAI 兼容接口，取回「标签 → 值」映射。
+
+兼容 OpenAI Chat Completions 协议：默认用 DeepSeek，也可在设置里改 API 地址
+与模型，接入 OpenAI、通义千问、Kimi、本地 Ollama/LM Studio 等任何兼容服务。
 
 纯逻辑（不依赖 Qt）：渲染表格文本 → 组装消息 → 调用 chat completions →
 解析返回的 JSON 成 `FieldMapping`。网络调用走 stdlib `urllib.request`
@@ -14,8 +17,9 @@ from pathlib import Path
 from app.core.models import FieldMapping, SheetData
 from app.paths import data_dir
 
-API_URL = "https://api.deepseek.com/chat/completions"
-MODEL = "deepseek-chat"
+# OpenAI 协议的默认服务（DeepSeek 提供 OpenAI 兼容接口）。
+DEFAULT_API_URL = "https://api.deepseek.com/chat/completions"
+DEFAULT_MODEL = "deepseek-chat"
 
 # 打包后（onefile）由 app.paths 解析 exe 附近的数据根目录。
 LOG_PATH = data_dir() / "logs" / "ai_scan.log"
@@ -125,33 +129,78 @@ def build_messages(sheet_text: str) -> list[dict]:
 # ----------------------------------------------------------------------
 # 网络调用
 # ----------------------------------------------------------------------
-def default_caller(messages: list[dict], api_key: str, timeout: float = 30.0) -> str:
-    """POST 到 DeepSeek chat completions，返回 assistant 文本内容。"""
-    body = {
-        "model": MODEL,
-        "messages": messages,
-        "temperature": 0,
-        "stream": False,
-        "response_format": {"type": "json_object"},
-    }
+def normalize_api_url(url: str | None) -> str:
+    """把用户填写的地址规范成 chat/completions 端点。
+
+    支持两种写法：
+    - 完整端点 `https://host/v1/chat/completions` → 原样使用；
+    - 基础地址 `https://host/v1` 或 `https://api.deepseek.com` → 末尾自动补
+      `/chat/completions`（与 OpenAI SDK 的 base_url 习惯一致）。
+    空值回退到默认 DeepSeek 端点。
+    """
+    text = (url or "").strip().rstrip("/")
+    if not text:
+        return DEFAULT_API_URL
+    if text.endswith("/chat/completions"):
+        return text
+    return text + "/chat/completions"
+
+
+def _post(url: str, body: dict, api_key: str, timeout: float) -> dict:
+    """发起一次 POST，返回解析后的 JSON（异常原样抛给调用方翻译）。"""
     data = json.dumps(body, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
-        API_URL, data=data, method="POST",
+        url, data=data, method="POST",
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         },
     )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _http_error_message(code: int) -> str:
+    return {
+        401: "API Key 无效或未授权（401），请检查设置里的 Key",
+        402: "账户余额不足（402），请先充值",
+        403: "没有访问权限（403），请检查 Key 与模型权限",
+        404: "接口地址不存在（404），请检查 API 地址",
+        429: "请求过于频繁，请稍后再试（429）",
+    }.get(code, f"服务返回错误（HTTP {code}）")
+
+
+def default_caller(messages: list[dict], api_key: str, timeout: float = 30.0, *,
+                   api_url: str | None = None,
+                   model: str | None = None) -> str:
+    """POST 到 OpenAI 兼容的 chat completions，返回 assistant 文本内容。
+
+    `api_url` 可为基础地址或完整端点（见 `normalize_api_url`）；`model`
+    为空时用 `DEFAULT_MODEL`。部分兼容服务不支持 JSON 模式
+    （`response_format`）或固定 temperature，收到 400 时去掉这两个可选字段
+    重试一次。
+    """
+    url = normalize_api_url(api_url)
+    body = {
+        "model": (model or "").strip() or DEFAULT_MODEL,
+        "messages": messages,
+        "temperature": 0,
+        "stream": False,
+        "response_format": {"type": "json_object"},
+    }
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+        try:
+            payload = _post(url, body, api_key, timeout)
+        except urllib.error.HTTPError as e:
+            if e.code != 400:
+                raise
+            e.close()
+            body.pop("response_format", None)
+            body.pop("temperature", None)
+            payload = _post(url, body, api_key, timeout)
     except urllib.error.HTTPError as e:
-        friendly = {
-            401: "API Key 无效或未授权（401），请检查设置里的 Key",
-            402: "账户余额不足（402），请先充值",
-            429: "请求过于频繁，请稍后再试（429）",
-        }.get(e.code, f"服务返回错误（HTTP {e.code}）")
-        raise AiScanError(friendly) from e
+        e.close()
+        raise AiScanError(_http_error_message(e.code)) from e
     except urllib.error.URLError as e:
         raise AiScanError(f"网络连接失败：{e.reason}") from e
     except (TimeoutError, socket.timeout) as e:
@@ -294,18 +343,20 @@ def _log_exchange(sheet: SheetData, messages: list[dict], content: str,
 # ----------------------------------------------------------------------
 def recommend_fields(sheet: SheetData, api_key: str, *,
                      caller=default_caller, timeout: float = 30.0,
+                     api_url: str | None = None, model: str | None = None,
                      max_rows: int = 200, max_cols: int = 40,
                      log_path: Path | None = None) -> list[FieldMapping]:
     """渲染 → 组装消息 → 调用模型 → 解析，返回推荐字段。
 
     `caller` 可注入用于测试（签名同 `default_caller`）；只有走默认网络 caller
-    时才写日志（避免测试污染 `data/logs`）。
+    时才使用 `api_url`/`model` 并写日志（避免测试污染 `data/logs`）。
     """
     if not api_key:
-        raise AiScanError("未配置 DeepSeek API Key")
+        raise AiScanError("未配置 API Key")
     sheet_text = build_sheet_text(sheet, max_rows=max_rows, max_cols=max_cols)
     messages = build_messages(sheet_text)
-    content = caller(messages, api_key, timeout=timeout)
+    extra = {"api_url": api_url, "model": model} if caller is default_caller else {}
+    content = caller(messages, api_key, timeout=timeout, **extra)
     fields = parse_pairs(content, sheet)
     if caller is default_caller:
         _log_exchange(sheet, messages, content, fields, log_path)

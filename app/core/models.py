@@ -32,7 +32,7 @@ class FieldMapping:
     标签 → 值（label_row/label_col + value_row/value_col）。
     """
     target: str = ""                 # 输出列名（= 标签文本）
-    source: str = "kv"               # kv（标签:值字段）
+    source: str = "kv"               # kv（标签:值字段）| filename（从文件名/文件夹名取汉字）
     is_key: bool = False             # 主键：反向写入时「匹配字段」默认只勾它
     key: Optional[Any] = None        # 标签文本（扫描字段按此匹配）
     value_type: str = "text"         # text | number | date

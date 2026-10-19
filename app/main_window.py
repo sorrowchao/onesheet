@@ -13,40 +13,62 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                                QWidget)
 
 from app.core.aggregator import aggregate
+from app.core.ai_scan import DEFAULT_API_URL, DEFAULT_MODEL
 from app.core.detector import detect_form_pairs_pos
+from app.core.document_reader import partition_excel_files, read_document
 from app.core.exporter import export_csv, export_xlsx
 from app.core.extractor import extract_file
 from app.core.models import (SEQ_COLUMN, FieldMapping, OutputTable,
                              ResultTable, SheetData, duplicate_value_positions)
-from app.core.reader import read_excel
+from app.core.pdf_reader import VisionConfig
+from app.core.reader import detect_format
 from app.core.writer import _norm_key, preview_write_back, read_summary_xlsx
 from app.service import settings
-from app.service.worker import AiScanWorker, ExtractWorker, WriteBackWorker
+from app.service.worker import (AiScanWorker, ExtractWorker, PdfReadWorker,
+                                WriteBackWorker)
 from app.template import store as template_store
 from app.ui import theme
+from app.ui.about_dialog import AboutDialog
 from app.ui.config_panel import ConfigPanel
-from app.ui.file_panel import FilePanel, collect_excel_files
+from app.ui.file_panel import FilePanel, collect_input_files
+from app.ui.import_folder_dialog import ImportFolderDialog
 from app.ui.preview_panel import PreviewPanel
 from app.ui.result_panel import ResultPanel
 from app.ui.template_manager import TemplateManagerDialog
 
 
 class ApiKeyDialog(QDialog):
-    """填写 / 修改 / 查看 DeepSeek API Key（默认密码显示，可切换明文）。"""
+    """填写 / 修改 / 查看 AI 接口配置（OpenAI 兼容协议）。
+
+    可配置 API Key、API 地址与模型；Key 默认密码显示，可切换明文。
+    地址既可填基础地址（如 `https://api.openai.com/v1`），也可填完整
+    `…/chat/completions` 端点；留空使用默认 DeepSeek。
+    """
 
     def __init__(self, stored_key: str = "", env_key_set: bool = False,
-                 parent=None):
+                 parent=None, api_url: str = "", model: str = "",
+                 env_url_set: bool = False, env_model_set: bool = False,
+                 vision_model: str = "", env_vision_model_set: bool = False):
         super().__init__(parent)
-        self.setWindowTitle("DeepSeek API Key")
+        self.setWindowTitle("AI 接口设置（OpenAI 兼容）")
         form = QFormLayout(self)
 
         if env_key_set:
-            status = ("当前使用环境变量 DEEPSEEK_API_KEY（优先于本地保存，"
-                      "会覆盖下面输入的 Key）")
+            status = ("当前使用环境变量中的 API Key（DEEPSEEK_API_KEY 或 "
+                      "OPENAI_API_KEY，优先于本地保存）")
         elif stored_key:
             status = "本地已保存 Key，可修改或清空"
         else:
             status = "尚未设置 Key"
+        overrides = []
+        if env_url_set:
+            overrides.append("API 地址（OPENAI_BASE_URL）")
+        if env_model_set:
+            overrides.append("模型（OPENAI_MODEL）")
+        if env_vision_model_set:
+            overrides.append("视觉模型（OPENAI_VISION_MODEL）")
+        if overrides:
+            status += "；环境变量优先：" + "、".join(overrides)
         status_label = QLabel(status)
         status_label.setWordWrap(True)
         form.addRow(status_label)
@@ -60,7 +82,23 @@ class ApiKeyDialog(QDialog):
         self.show_box.toggled.connect(self._toggle_echo)
         form.addRow("", self.show_box)
 
-        hint = QLabel("Key 保存在本地 data/settings.json；留空并点「确定」可清除本地 Key。")
+        self.url_edit = QLineEdit(api_url)
+        self.url_edit.setPlaceholderText(f"默认：{DEFAULT_API_URL}")
+        form.addRow("API 地址", self.url_edit)
+
+        self.model_edit = QLineEdit(model)
+        self.model_edit.setPlaceholderText(f"默认：{DEFAULT_MODEL}")
+        form.addRow("模型", self.model_edit)
+
+        self.vision_edit = QLineEdit(vision_model)
+        self.vision_edit.setPlaceholderText(
+            "留空则沿用上方模型；扫描件需支持图片输入，如 gpt-4o、qwen-vl-max")
+        form.addRow("视觉模型", self.vision_edit)
+
+        hint = QLabel(
+            "兼容 OpenAI Chat Completions 协议。地址可填基础地址（如 "
+            "https://api.openai.com/v1）或完整 …/chat/completions 端点。\n"
+            "配置保存在本地 data/settings.json；留空并点「确定」可清除对应项。")
         hint.setWordWrap(True)
         form.addRow(hint)
 
@@ -75,6 +113,15 @@ class ApiKeyDialog(QDialog):
 
     def key(self) -> str:
         return self.key_edit.text().strip()
+
+    def api_url(self) -> str:
+        return self.url_edit.text().strip()
+
+    def model(self) -> str:
+        return self.model_edit.text().strip()
+
+    def vision_model(self) -> str:
+        return self.vision_edit.text().strip()
 
 
 class TryExtractDialog(QDialog):
@@ -133,11 +180,11 @@ class WriteBackDialog(QDialog):
 
         self.file_edit = QLineEdit()
         self.file_edit.setReadOnly(True)
-        file_btn = QPushButton("浏览…")
-        file_btn.clicked.connect(self._browse_summary)
+        self.file_btn = QPushButton("浏览…")
+        self.file_btn.clicked.connect(self._browse_summary)
         file_row = QHBoxLayout()
         file_row.addWidget(self.file_edit, 1)
-        file_row.addWidget(file_btn)
+        file_row.addWidget(self.file_btn)
         form.addRow("汇总文件", file_row)
 
         self.output_table_combo = QComboBox()
@@ -173,6 +220,7 @@ class WriteBackDialog(QDialog):
         is_current = self.source_combo.currentIndex() == 0
         self.table_combo.setEnabled(is_current)
         self.file_edit.setEnabled(not is_current)
+        self.file_btn.setEnabled(not is_current)
         if is_current:
             self._sync_output_table_to_result()
         self._refresh_match_columns()
@@ -320,6 +368,7 @@ class MainWindow(QMainWindow):
         self._results: dict[str, ResultTable] = {}
         self._worker = None
         self._ai_worker = None
+        self._pdf_worker = None
         self._current_file: str | None = None
 
         central = QWidget()
@@ -419,7 +468,7 @@ class MainWindow(QMainWindow):
         self._set_theme(settings.get_theme(), persist=False)
         self._set_icon(settings.get_icon(), persist=False)
         self._restore_window_state()
-        self.statusBar().showMessage("导入 Excel 文件开始")
+        self.statusBar().showMessage("导入文件开始（支持 Excel / Word / PDF / CSV）")
 
     # ------------------------------------------------------------------
     def _build_menus(self):
@@ -441,7 +490,7 @@ class MainWindow(QMainWindow):
         data_menu = menubar.addMenu("数据")
         data_menu.addAction("扫描表单", self._on_scan_form)
         data_menu.addAction("AI 扫描表单", self._on_ai_scan_form)
-        data_menu.addAction("DeepSeek API Key…", self._edit_api_key)
+        data_menu.addAction("AI 接口设置（OpenAI 兼容）…", self._edit_api_key)
         data_menu.addAction("手动配对", self._on_pair_requested)
         data_menu.addSeparator()
         data_menu.addAction("试抽当前文件", self._run_try_extract)
@@ -470,7 +519,7 @@ class MainWindow(QMainWindow):
         icon_group.setExclusive(True)
         icon_files = settings.available_icons()
         if not icon_files:
-            empty_act = icon_menu.addAction("（data/icons 下没有图标）")
+            empty_act = icon_menu.addAction("（没有可用图标）")
             empty_act.setEnabled(False)
         for p in icon_files:
             act = QAction(p.stem, self)
@@ -498,7 +547,10 @@ class MainWindow(QMainWindow):
             settings.set_theme(name)
 
     def _set_icon(self, name: str, persist: bool = True):
-        """应用 data/icons/ 下的图标，同步菜单勾选；persist 时写入设置。"""
+        """应用内置 app/icons 或用户 data/icons 的图标，同步菜单勾选。
+
+        persist 时写入设置。
+        """
         path = settings.icon_path(name)
         if path is None:
             return
@@ -532,11 +584,7 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _about(self):
-        QMessageBox.about(
-            self, "关于",
-            "一表通（OneSheet）\n\n"
-            "多表归一：从 Excel 文件中提取「表单（标签:值）」数据并汇总，"
-            "支持把编辑后的汇总值反向写回源文件。")
+        AboutDialog(self).exec()
 
     # ------------------------------------------------------------------
     # 文件
@@ -544,7 +592,10 @@ class MainWindow(QMainWindow):
     def _import_files(self):
         start = settings.get_last_import_dir()
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "选择 Excel 文件", start, "Excel 文件 (*.xlsx *.xls *.xlsm)")
+            self, "选择文件", start,
+            "支持的文件 (*.xlsx *.xls *.xlsm *.docx *.pdf *.csv);;"
+            "Excel 文件 (*.xlsx *.xls *.xlsm);;"
+            "Word 文件 (*.docx);;PDF 文件 (*.pdf);;CSV 文件 (*.csv)")
         if paths:
             self.file_panel.add_files(paths)
             self._remember_import_dir(str(Path(paths[0]).parent))
@@ -552,13 +603,23 @@ class MainWindow(QMainWindow):
     def _import_folder(self):
         start = settings.get_last_import_dir()
         folder = QFileDialog.getExistingDirectory(self, "选择文件夹", start)
-        if folder:
-            files = collect_excel_files([folder])
-            if files:
-                self.file_panel.add_files(files)
-                self._remember_import_dir(folder)
-            else:
-                QMessageBox.information(self, "提示", "该文件夹下没有 Excel 文件")
+        if not folder:
+            return
+        dlg = ImportFolderDialog(
+            folder, self, initial=settings.get_folder_import_options())
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        files = dlg.selected_files()
+        try:
+            settings.set_folder_import_options(dlg.options())
+        except OSError:
+            pass
+        if files:
+            self.file_panel.add_files(files)
+            self._remember_import_dir(folder)
+            self.statusBar().showMessage(f"已导入 {len(files)} 个文件")
+        else:
+            QMessageBox.information(self, "提示", "该文件夹下没有符合条件的文件")
 
     @staticmethod
     def _remember_import_dir(path: str):
@@ -595,9 +656,9 @@ class MainWindow(QMainWindow):
         paths = [u.toLocalFile() for u in event.mimeData().urls()
                  if u.isLocalFile()]
         event.acceptProposedAction()
-        files = collect_excel_files(paths)
+        files = collect_input_files(paths)
         if not files:
-            self.statusBar().showMessage("拖入的内容里没有 Excel 文件")
+            self.statusBar().showMessage("拖入的内容里没有受支持的文件")
             return
         self.file_panel.add_files(files)
         first = Path(paths[0])
@@ -606,17 +667,54 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"已导入 {len(files)} 个文件")
 
     def _on_file_activated(self, path: str):
+        if self._pdf_worker is not None and self._pdf_worker.isRunning():
+            self.statusBar().showMessage("正在解析 PDF，请稍候…")
+            return
         try:
-            self._sheets = read_excel(path)
+            is_pdf = detect_format(path) == "pdf"
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(self, "读取失败", str(e))
             return
-        if not self._sheets:
-            self.statusBar().showMessage("该文件没有 sheet")
+        if is_pdf:
+            self._start_pdf_preview(path)
+            return
+        try:
+            sheets = read_document(path)
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, "读取失败", str(e))
+            return
+        self._show_sheets(path, sheets)
+
+    def _show_sheets(self, path: str, sheets: list[SheetData]):
+        """成功读取后统一替换当前预览（失败时保留旧内容）。"""
+        if not sheets:
+            self.statusBar().showMessage("该文件没有可读取的内容")
             return
         self._current_file = path
-        self.preview_panel.set_sheets(self._sheets)
-        self.statusBar().showMessage(f"{path} — 共 {len(self._sheets)} 个 sheet")
+        self._sheets = sheets
+        self.config_panel.set_current_file(path)
+        self.preview_panel.set_sheets(sheets)
+        self.statusBar().showMessage(f"{path} — 共 {len(sheets)} 个 sheet")
+
+    def _start_pdf_preview(self, path: str):
+        """PDF 可能触发视觉模型调用（每页一次），放后台避免界面卡死。"""
+        self.statusBar().showMessage("正在解析 PDF…")
+        worker = PdfReadWorker(path, self._vision_config(), self)
+        worker.status.connect(self.statusBar().showMessage)
+        worker.error.connect(self._on_pdf_read_error)
+        worker.done.connect(lambda sheets, p=path: self._on_pdf_read_done(p, sheets))
+        worker.finished.connect(worker.deleteLater)
+        self._pdf_worker = worker
+        worker.start()
+
+    def _on_pdf_read_done(self, path: str, sheets: list):
+        self._pdf_worker = None
+        self._show_sheets(path, sheets)
+
+    def _on_pdf_read_error(self, msg: str):
+        self._pdf_worker = None
+        self.statusBar().showMessage("PDF 读取失败")
+        QMessageBox.warning(self, "读取失败", msg)
 
     def _on_field_selected(self, field):
         """配置区字段表选中某行：预览区高亮对应标签/值。"""
@@ -640,22 +738,48 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"已扫描到 {len(fields)} 个字段，可勾选/取消，或直接改「值行/值列」")
 
     # ------------------------------------------------------------------
-    # AI 扫描表单（DeepSeek）
+    # AI 扫描表单（OpenAI 兼容接口）
     # ------------------------------------------------------------------
+    def _api_dialog(self) -> ApiKeyDialog:
+        """按当前设置构造接口配置对话框（本地值回显，环境变量只提示）。"""
+        return ApiKeyDialog(
+            settings.get_stored_api_key(),
+            bool(settings.env_api_key()),
+            self,
+            api_url=settings.get_stored_ai_api_url(),
+            model=settings.get_stored_ai_model(),
+            env_url_set=bool(settings.env_ai_api_url()),
+            env_model_set=bool(settings.env_ai_model()),
+            vision_model=settings.get_stored_ai_vision_model(),
+            env_vision_model_set=bool(settings.env_ai_vision_model()),
+        )
+
+    def _save_api_dialog(self, dlg: ApiKeyDialog):
+        settings.set_api_key(dlg.key())
+        settings.set_ai_api_url(dlg.api_url())
+        settings.set_ai_model(dlg.model())
+        settings.set_ai_vision_model(dlg.vision_model())
+
+    def _vision_config(self):
+        """扫描件 PDF 用的视觉模型配置（与 AI 扫描共用 Key / 地址）。"""
+        return VisionConfig(
+            api_key=settings.get_api_key(),
+            api_url=settings.get_ai_api_url(),
+            model=settings.get_ai_vision_model(),
+            timeout=120.0,
+        )
+
     def _edit_api_key(self):
-        """菜单入口：填写 / 修改 / 查看 DeepSeek API Key。"""
-        env = settings.env_api_key()
-        dlg = ApiKeyDialog(settings.get_stored_api_key(), bool(env), self)
+        """菜单入口：填写 / 修改 / 查看 AI 接口配置。"""
+        dlg = self._api_dialog()
         if dlg.exec() != QDialog.Accepted:
             return
-        settings.set_api_key(dlg.key())
-        if env:
+        self._save_api_dialog(dlg)
+        if settings.env_api_key() or settings.env_ai_api_url() or settings.env_ai_model():
             self.statusBar().showMessage(
-                "Key 已保存到本地设置；当前仍优先使用环境变量 DEEPSEEK_API_KEY")
-        elif dlg.key():
-            self.statusBar().showMessage("DeepSeek API Key 已保存")
+                "配置已保存到本地设置；当前仍有环境变量生效（环境变量优先）")
         else:
-            self.statusBar().showMessage("已清除本地 DeepSeek API Key")
+            self.statusBar().showMessage("AI 接口配置已保存")
 
     def _on_ai_scan_form(self):
         if self._ai_worker is not None and self._ai_worker.isRunning():
@@ -667,15 +791,18 @@ class MainWindow(QMainWindow):
             return
         key = settings.get_api_key()
         if not key:
-            dlg = ApiKeyDialog(settings.get_stored_api_key(),
-                               bool(settings.env_api_key()), self)
+            dlg = self._api_dialog()
             if dlg.exec() != QDialog.Accepted or not dlg.key():
                 return
-            settings.set_api_key(dlg.key())
+            self._save_api_dialog(dlg)
             key = dlg.key()
 
         self.statusBar().showMessage("AI 识别中…")
-        self._ai_worker = AiScanWorker(sheet, key)
+        self._ai_worker = AiScanWorker(
+            sheet, key,
+            api_url=settings.get_ai_api_url(),
+            model=settings.get_ai_model(),
+        )
         self._ai_worker.done.connect(self._on_ai_scan_done)
         self._ai_worker.error.connect(self._on_ai_scan_error)
         self._ai_worker.start()
@@ -693,8 +820,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("AI 识别失败")
         QMessageBox.warning(
             self, "AI 识别失败",
-            f"{msg}\n\n可在下次点击「AI 扫描表单」时重新输入 Key，"
-            "或设置环境变量 DEEPSEEK_API_KEY。")
+            f"{msg}\n\n可在「数据 → AI 接口设置」中检查 Key、API 地址和模型，"
+            "或设置环境变量 DEEPSEEK_API_KEY / OPENAI_API_KEY。")
 
     def _on_pair_requested(self):
         if self.preview_panel.current_sheet() is None:
@@ -787,7 +914,7 @@ class MainWindow(QMainWindow):
                                 "以下结果表还没有选择任何字段：\n" + "、".join(empty))
             return
         try:
-            per_file = extract_file(self._sheets, tpl)
+            per_file = extract_file(self._sheets, tpl, self._current_file)
             merged = aggregate([per_file])
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(self, "试抽失败", str(e))
@@ -824,7 +951,7 @@ class MainWindow(QMainWindow):
         self._start_task()
         self.progress.setRange(0, len(files))
         self.progress.setValue(0)
-        self._worker = ExtractWorker(files, tpl)
+        self._worker = ExtractWorker(files, tpl, vision=self._vision_config())
         self._worker.progress.connect(self._on_progress)
         self._worker.file_ok.connect(lambda p: self._log(f"成功：{p}"))
         self._worker.file_error.connect(lambda p, e: self._log(f"失败：{p} — {e}"))
@@ -891,6 +1018,13 @@ class MainWindow(QMainWindow):
             else:
                 QMessageBox.information(self, "提示", "请先导入文件")
             return
+        excel_files, skipped = partition_excel_files(files)
+        if not excel_files:
+            QMessageBox.information(
+                self, "提示",
+                "反向写入仅支持 Excel 文件（.xlsx / .xls / .xlsm）。\n"
+                "当前勾选的文件中没有 Excel，Word / PDF / CSV 不会被写回。")
+            return
         tpl = self.config_panel.get_template()
         if not tpl.output_tables:
             QMessageBox.information(self, "提示", "请先配置至少一张结果表")
@@ -922,14 +1056,18 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "提示", "请至少勾选一个匹配字段")
             return
 
-        if not self._confirm_write_back_plan(files, ot, summary, key_cols):
+        if not self._confirm_write_back_plan(excel_files, ot, summary, key_cols):
             return
 
         self.log.clear()
+        if skipped:
+            self._log(f"已跳过 {len(skipped)} 个非 Excel 文件（反向写入仅支持 Excel）：")
+            for p in skipped:
+                self._log(f"  跳过：{p}")
         self._start_task()
-        self.progress.setRange(0, len(files))
+        self.progress.setRange(0, len(excel_files))
         self.progress.setValue(0)
-        self._worker = WriteBackWorker(files, ot, summary, key_cols, output_dir)
+        self._worker = WriteBackWorker(excel_files, ot, summary, key_cols, output_dir)
         self._worker.progress.connect(self._on_write_progress)
         self._worker.done.connect(self._on_write_back_done)
         self._worker.start()
@@ -1059,4 +1197,7 @@ class MainWindow(QMainWindow):
             })
         except OSError:
             pass  # 设置文件不可写时不影响退出
+        if self._pdf_worker is not None and self._pdf_worker.isRunning():
+            self._pdf_worker.cancel()
+            self._pdf_worker.wait(2000)
         super().closeEvent(event)

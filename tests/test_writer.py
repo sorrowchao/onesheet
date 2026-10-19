@@ -84,6 +84,27 @@ class TestWriteBackXlsx(unittest.TestCase):
             self.assertEqual(cell_value(o2, 1, 1), "男")
             self.assertEqual(cell_value(o2, 2, 1), 26)
 
+    def test_filename_field_is_not_written(self):
+        """source=filename 的列没有单元格位置，反向写入应跳过它。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            p1 = str(Path(tmp) / "张三.xlsx")
+            make_form_xlsx(p1, "张三", "男", 34)
+
+            ot = make_output_table()
+            ot.fields.append(FieldMapping(target="文件名", source="filename"))
+            summary = ResultTable(
+                name="汇总",
+                columns=["姓名", "性别", "年龄", "文件名"],
+                rows=[["张三", "男", 34, "张三"]],
+            )
+            out_dir = str(Path(tmp) / "out")
+            report = write_back([p1], ot, summary, [0], out_dir)
+
+            self.assertEqual(report["errors"], [])
+            self.assertEqual(len(report["written"]), 1)
+            sheet = read_excel(str(Path(out_dir) / "张三.xlsx"))[0]
+            self.assertEqual((sheet.max_row, sheet.max_col), (3, 2))
+
     def test_unmatched_and_unused(self):
         with tempfile.TemporaryDirectory() as tmp:
             p1 = str(Path(tmp) / "张三.xlsx")
@@ -428,6 +449,30 @@ class TestReadSummary(unittest.TestCase):
             self.assertEqual(rt.name, "汇总")
             self.assertEqual(rt.columns, ["姓名", "性别", "年龄"])
             self.assertEqual(rt.rows, [["张三", "男", 30], ["李四", "女", 25]])
+
+
+class TestWriteBackRejectsNonExcel(unittest.TestCase):
+    def test_csv_is_reported_as_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "data.csv")
+            Path(path).write_text("姓名,性别,年龄\n张三,男,34\n", encoding="utf-8")
+            summary = ResultTable(name="汇总", columns=["姓名", "性别", "年龄"],
+                                  rows=[["张三", "女", 35]])
+            plan = preview_write_back([path], make_output_table(), summary, [0])
+            self.assertEqual(plan["file_count"], 0)
+            self.assertEqual(len(plan["errors"]), 1)
+            self.assertIn("Excel", plan["errors"][0][1])
+
+    def test_write_back_does_not_write_csv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "data.csv")
+            Path(path).write_text("姓名,性别,年龄\n张三,男,34\n", encoding="utf-8")
+            summary = ResultTable(name="汇总", columns=["姓名", "性别", "年龄"],
+                                  rows=[["张三", "女", 35]])
+            out_dir = str(Path(tmp) / "out")
+            report = write_back([path], make_output_table(), summary, [0], out_dir)
+            self.assertEqual(report["written"], [])
+            self.assertEqual(len(report["errors"]), 1)
 
 
 if __name__ == "__main__":

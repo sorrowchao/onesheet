@@ -55,6 +55,20 @@ class ThemeTest(unittest.TestCase):
             self.assertIn("QPlainTextEdit#logView", qss)
             self.assertIn("font-family: Consolas", qss)
 
+    def test_double_spin_box_styled(self):
+        """文件大小用 QDoubleSpinBox，必须有与 QSpinBox 相同的输入框样式。"""
+        for name in theme.ALL:
+            qss = theme.stylesheet(name)
+            self.assertIn("QDoubleSpinBox", qss)
+            self.assertIn("QDoubleSpinBox:focus", qss)
+
+    def test_dialog_hint_and_error_text_colors(self):
+        """对话框辅助文字 / 错误提示使用主题色，不能写死颜色。"""
+        for name in theme.ALL:
+            qss = theme.stylesheet(name)
+            self.assertIn("QLabel#dialogHint", qss)
+            self.assertIn("QLabel#errorText", qss)
+
     def test_fields_table_checkbox_centered(self):
         """字段映射表首列勾选框靠 QSS margin 居中（列宽 44、勾选框 17）。"""
         for name in theme.ALL:

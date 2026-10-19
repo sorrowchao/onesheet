@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFormLayout,
                                QScrollArea, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
+from app.core.extractor import object_name_from_path
 from app.core.models import (ExtractTemplate, FieldMapping,
                              OutputTable, SheetConfig, SheetData, dedupe_targets)
 
@@ -66,6 +67,7 @@ class ConfigPanel(QWidget):
         self._form_fields: list[FieldMapping] = []   # 当前结果表的候选字段
         self._checked: set[int] = set()               # 候选字段中被勾选的索引
         self._sheet: SheetData | None = None          # 用于「值预览」列
+        self._current_path: str | None = None         # 当前预览文件（文件名列预览）
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -169,6 +171,7 @@ class ConfigPanel(QWidget):
         key_row.addWidget(self.key_combo, 1)
         fields_layout.addLayout(key_row)
 
+        # 第一行：生成字段 / 添加字段；第二行：勾选、移动、删除。
         fbtns = QHBoxLayout()
         self.btn_scan = QPushButton("扫描表单")
         self.btn_scan.clicked.connect(self.form_scan_requested.emit)
@@ -179,15 +182,13 @@ class ConfigPanel(QWidget):
         self.btn_pair.clicked.connect(self.pair_requested.emit)
         btn_add_f = QPushButton("添加字段")
         btn_add_f.clicked.connect(self._add_field_row)
-        btn_del_f = QPushButton("删除选中")
-        btn_del_f.setToolTip("删除当前选中的一个或多个字段（可 Ctrl/Shift 多选）")
-        btn_del_f.clicked.connect(self._del_field_row)
-        btn_up = QPushButton("上移")
-        btn_up.clicked.connect(lambda: self._move_field(-1))
-        btn_down = QPushButton("下移")
-        btn_down.clicked.connect(lambda: self._move_field(1))
+        self.btn_add_filename = QPushButton("添加文件名")
+        self.btn_add_filename.setToolTip(
+            "添加「文件名」列：取文件名里的汉字；文件名没有汉字时取所在文件夹名。\n"
+            "例：国能混凝土107-1.xlsx → 国能混凝土；采购部/107-1.xlsx → 采购部")
+        self.btn_add_filename.clicked.connect(self._add_filename_field)
         for b in (self.btn_scan, self.btn_ai, self.btn_pair,
-                  btn_add_f, btn_del_f, btn_up, btn_down):
+                  btn_add_f, self.btn_add_filename):
             fbtns.addWidget(b)
         fbtns.addStretch(1)
         fields_layout.addLayout(fbtns)
@@ -201,10 +202,18 @@ class ConfigPanel(QWidget):
         btn_none = QPushButton("全不选")
         btn_none.setToolTip("取消所有字段的勾选（不删除）")
         btn_none.clicked.connect(self._clear_form)
+        btn_up = QPushButton("上移")
+        btn_up.clicked.connect(lambda: self._move_field(-1))
+        btn_down = QPushButton("下移")
+        btn_down.clicked.connect(lambda: self._move_field(1))
+        btn_del_f = QPushButton("删除选中")
+        btn_del_f.setToolTip("删除当前选中的一个或多个字段（可 Ctrl/Shift 多选）")
+        btn_del_f.clicked.connect(self._del_field_row)
         btn_clear = QPushButton("清空")
         btn_clear.setToolTip("删除全部字段（清空映射表）")
         btn_clear.clicked.connect(self._clear_all_form)
-        for b in (btn_all, btn_invert, btn_none, btn_clear):
+        for b in (btn_all, btn_invert, btn_none, btn_up, btn_down,
+                  btn_del_f, btn_clear):
             fbtns2.addWidget(b)
         fbtns2.addStretch(1)
         fields_layout.addLayout(fbtns2)
@@ -219,6 +228,11 @@ class ConfigPanel(QWidget):
     def set_sheet(self, sheet: SheetData | None):
         """当前预览的 sheet 变化时，刷新「值预览」列。"""
         self._sheet = sheet
+        self._refresh_value_preview()
+
+    def set_current_file(self, path: str | None):
+        """当前预览文件变化时，刷新「文件名」字段的值预览。"""
+        self._current_path = path
         self._refresh_value_preview()
 
     def set_template(self, tpl: ExtractTemplate):
@@ -345,11 +359,16 @@ class ConfigPanel(QWidget):
                 label = QTableWidgetItem(f.target or str(f.key or ""))
                 label.setTextAlignment(center)
                 self.fields_table.setItem(r, 1, label)
+                from_filename = f.source == "filename"
                 value_row = QTableWidgetItem(str(f.value_row) if f.value_row else "")
                 value_row.setTextAlignment(center)
-                self.fields_table.setItem(r, 2, value_row)
                 value_col = QTableWidgetItem(str(f.value_col) if f.value_col else "")
                 value_col.setTextAlignment(center)
+                if from_filename:
+                    # 文件名列不按单元格取值，位置列不可编辑。
+                    value_row.setFlags(value_row.flags() & ~Qt.ItemIsEditable)
+                    value_col.setFlags(value_col.flags() & ~Qt.ItemIsEditable)
+                self.fields_table.setItem(r, 2, value_row)
                 self.fields_table.setItem(r, 3, value_col)
                 preview = QTableWidgetItem(self._preview_text(f))
                 preview.setTextAlignment(center)
@@ -388,6 +407,8 @@ class ConfigPanel(QWidget):
         self.template_changed.emit()
 
     def _preview_text(self, f: FieldMapping) -> str:
+        if f.source == "filename":
+            return object_name_from_path(self._current_path)
         if f.value_row is None or f.value_col is None or self._sheet is None:
             return ""
         grid = self._sheet.grid
@@ -425,7 +446,8 @@ class ConfigPanel(QWidget):
             if col == 1:
                 text = item.text().strip()
                 f.target = text
-                f.key = text
+                if f.source != "filename":
+                    f.key = text
                 dedupe_targets(self._form_fields)
                 # 重名标签可能被自动改名，整表刷新以同步显示
                 self._rebuild_fields_table()
@@ -465,6 +487,20 @@ class ConfigPanel(QWidget):
         self._rebuild_fields_table()
         self.fields_table.setCurrentCell(len(self._form_fields) - 1, 1)
         self.fields_table.editItem(self.fields_table.item(len(self._form_fields) - 1, 1))
+
+    def _add_filename_field(self):
+        """添加一行「文件名」字段（取文件名/文件夹名里的汉字），已有则不重复添加。"""
+        self._ensure_table()
+        for i, f in enumerate(self._form_fields):
+            if f.source == "filename":
+                self.fields_table.setCurrentCell(i, 1)
+                return
+        self._form_fields.append(FieldMapping(target="文件名", source="filename"))
+        dedupe_targets(self._form_fields)
+        self._checked.add(len(self._form_fields) - 1)
+        self._rebuild_fields_table()
+        self.fields_table.setCurrentCell(len(self._form_fields) - 1, 1)
+        self.template_changed.emit()
 
     def _selected_rows(self) -> list[int]:
         """当前选中的字段行号（升序去重）；无选中时回退到当前行。"""

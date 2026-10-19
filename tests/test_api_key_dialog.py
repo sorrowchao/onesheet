@@ -29,6 +29,28 @@ class ApiKeyDialogTest(unittest.TestCase):
         dlg.key_edit.clear()
         self.assertEqual(dlg.key(), "")
 
+    def test_api_url_and_model_prefilled(self):
+        dlg = ApiKeyDialog("sk-abc123", api_url="https://api.openai.com/v1",
+                           model="gpt-4o-mini")
+        self.assertEqual(dlg.api_url(), "https://api.openai.com/v1")
+        self.assertEqual(dlg.model(), "gpt-4o-mini")
+
+    def test_api_url_and_model_default_empty(self):
+        dlg = ApiKeyDialog("sk-abc123")
+        self.assertEqual(dlg.api_url(), "")
+        self.assertEqual(dlg.model(), "")
+
+    def test_vision_model_prefilled_and_empty_by_default(self):
+        dlg = ApiKeyDialog("sk-abc123", vision_model="qwen-vl-max")
+        self.assertEqual(dlg.vision_model(), "qwen-vl-max")
+        dlg2 = ApiKeyDialog("sk-abc123")
+        self.assertEqual(dlg2.vision_model(), "")
+
+    def test_vision_model_reads_edited_text(self):
+        dlg = ApiKeyDialog("sk-abc123")
+        dlg.vision_edit.setText("  gpt-4o  ")
+        self.assertEqual(dlg.vision_model(), "gpt-4o")
+
 
 if __name__ == "__main__":
     unittest.main()

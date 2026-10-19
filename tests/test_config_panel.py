@@ -277,5 +277,54 @@ class FieldSelectedSignalTest(unittest.TestCase):
         self.assertEqual(self.got, [])
 
 
+class FilenameFieldTest(unittest.TestCase):
+    """「添加文件名」按钮：添加 filename 字段，值预览来自当前文件路径。"""
+
+    def setUp(self):
+        self.panel = ConfigPanel()
+        self.panel.set_form_fields(_fields("A"))
+        self.panel.set_current_file("C:/data/国能混凝土107-1.xlsx")
+
+    def tearDown(self):
+        self.panel.deleteLater()
+
+    def test_button_label(self):
+        self.assertEqual(self.panel.btn_add_filename.text(), "添加文件名")
+
+    def test_adds_filename_row(self):
+        self.panel._add_filename_field()
+        f = self.panel._form_fields[-1]
+        self.assertEqual(f.source, "filename")
+        self.assertEqual(f.target, "文件名")
+        self.assertIsNone(f.value_row)
+        self.assertIsNone(f.value_col)
+        self.assertEqual(self.panel.fields_table.rowCount(), 2)
+        self.assertEqual(self.panel.fields_table.item(1, 4).text(), "国能混凝土")
+
+    def test_position_cells_not_editable(self):
+        self.panel._add_filename_field()
+        r = len(self.panel._form_fields) - 1
+        for col in (2, 3):
+            flags = self.panel.fields_table.item(r, col).flags()
+            self.assertFalse(flags & Qt.ItemFlag.ItemIsEditable)
+
+    def test_no_duplicate_filename_field(self):
+        self.panel._add_filename_field()
+        self.panel._add_filename_field()
+        count = sum(1 for f in self.panel._form_fields if f.source == "filename")
+        self.assertEqual(count, 1)
+
+    def test_preview_falls_back_to_folder(self):
+        self.panel.set_current_file("C:/data/采购部/107-1.xlsx")
+        self.panel._add_filename_field()
+        f = self.panel._form_fields[-1]
+        self.assertEqual(self.panel._preview_text(f), "采购部")
+
+    def test_filename_field_reaches_template(self):
+        self.panel._add_filename_field()
+        fields = self.panel.get_template().output_tables[0].fields
+        self.assertEqual([f.source for f in fields], ["kv", "filename"])
+
+
 if __name__ == "__main__":
     unittest.main()

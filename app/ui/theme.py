@@ -54,6 +54,7 @@ _DARK = {
     "status_text": "#ffffff",
     "check_bg": "#1e1e1e",    # 未勾选框底色
     "check_border": "#6b6b6b",  # 未勾选框边框（与底色区分，能看见）
+    "danger": "#f14c4c",      # 错误提示文字
 }
 
 _LIGHT = {
@@ -81,6 +82,7 @@ _LIGHT = {
     "status_text": "#ffffff",
     "check_bg": "#ffffff",
     "check_border": "#8a8a8a",
+    "danger": "#cd3131",
 }
 
 _PALETTES = {DARK: _DARK, LIGHT: _LIGHT}
@@ -157,13 +159,17 @@ QLabel#sectionHeader {
     border-radius: 6px;
 }
 
+/* --- 对话框辅助文字 / 错误提示 --- */
+QLabel#dialogHint { color: $text_dim; }
+QLabel#errorText { color: $danger; }
+
 /* --- 侧栏着色 --- */
 QWidget#sidePanel { background-color: $bg_side; }
 QScrollArea { border: none; background-color: $bg_side; }
 QWidget#sideBody { background-color: $bg_side; }
 
 /* --- 输入控件 --- */
-QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QComboBox {
+QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     background-color: $bg_input;
     color: $text;
     border: 1px solid $input_border;
@@ -172,7 +178,8 @@ QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QComboBox {
     selection-background-color: $sel;
     selection-color: $sel_text;
 }
-QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus, QComboBox:focus {
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus,
+QDoubleSpinBox:focus, QComboBox:focus {
     border: 1px solid $focus_border;
 }
 QComboBox::drop-down { border: none; width: 20px; }

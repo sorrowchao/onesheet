@@ -55,6 +55,20 @@ class WriteBackDefaultTest(unittest.TestCase):
         dlg = self._dialog(_output_table(key=False), edited, original)
         self.assertEqual(self._checked(dlg), ["单位详细名称", "姓名"])
 
+    def test_summary_file_disabled_for_current_results(self):
+        rt = _table([[1, "A厂", 10, "张三"]])
+        dlg = self._dialog(_output_table(key=False), rt, rt)
+        self.assertFalse(dlg.file_edit.isEnabled())
+        self.assertFalse(dlg.file_btn.isEnabled())
+
+        dlg.source_combo.setCurrentIndex(1)  # 导入汇总 Excel
+        self.assertTrue(dlg.file_edit.isEnabled())
+        self.assertTrue(dlg.file_btn.isEnabled())
+
+        dlg.source_combo.setCurrentIndex(0)  # 切回当前抽取结果
+        self.assertFalse(dlg.file_edit.isEnabled())
+        self.assertFalse(dlg.file_btn.isEnabled())
+
     def test_key_overrides_changed_logic(self):
         # 主键字段本身被改动过，仍然默认勾选（因为它才是匹配依据）
         original = _table([[1, "A厂", 10, "张三"]])

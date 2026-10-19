@@ -1,8 +1,12 @@
 """ai_scan.py 单元测试（纯逻辑，不联网）。"""
+import json
 import unittest
+import urllib.error
+from unittest import mock
 
-from app.core.ai_scan import (AiScanError, build_messages, build_sheet_text,
-                              parse_pairs, recommend_fields)
+from app.core.ai_scan import (DEFAULT_API_URL, DEFAULT_MODEL, AiScanError,
+                              build_messages, build_sheet_text, default_caller,
+                              normalize_api_url, parse_pairs, recommend_fields)
 from app.core.models import FieldMapping, SheetData
 
 
@@ -152,6 +156,98 @@ class TableFormPromptTest(unittest.TestCase):
                          [(12, 3), (13, 3), (14, 3)])
         # 表格型：label 位置共用表头格
         self.assertTrue(all((f.label_row, f.label_col) == (6, 3) for f in fields))
+
+
+class NormalizeApiUrlTest(unittest.TestCase):
+    """OpenAI 兼容地址：基础地址 / 完整端点都接受。"""
+
+    def test_empty_uses_default(self):
+        self.assertEqual(normalize_api_url(None), DEFAULT_API_URL)
+        self.assertEqual(normalize_api_url("   "), DEFAULT_API_URL)
+
+    def test_full_endpoint_kept(self):
+        url = "https://api.openai.com/v1/chat/completions"
+        self.assertEqual(normalize_api_url(url), url)
+
+    def test_base_url_gets_suffix(self):
+        self.assertEqual(normalize_api_url("https://api.openai.com/v1"),
+                         "https://api.openai.com/v1/chat/completions")
+
+    def test_trailing_slash_trimmed(self):
+        self.assertEqual(normalize_api_url("https://api.deepseek.com/"),
+                         "https://api.deepseek.com/chat/completions")
+
+
+class _FakeResponse:
+    def __init__(self, payload: dict):
+        self._payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return json.dumps(self._payload).encode("utf-8")
+
+
+class DefaultCallerTest(unittest.TestCase):
+    """请求体遵循 OpenAI Chat Completions 协议。"""
+
+    def test_custom_url_and_model(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=0):
+            captured["url"] = req.full_url
+            captured["body"] = json.loads(req.data.decode("utf-8"))
+            captured["auth"] = req.get_header("Authorization")
+            return _FakeResponse(
+                {"choices": [{"message": {"content": "{}"}}]})
+
+        with mock.patch("app.core.ai_scan.urllib.request.urlopen", fake_urlopen):
+            out = default_caller([{"role": "user", "content": "x"}], "sk-x",
+                                 api_url="https://api.openai.com/v1",
+                                 model="gpt-4o-mini")
+        self.assertEqual(out, "{}")
+        self.assertEqual(captured["url"],
+                         "https://api.openai.com/v1/chat/completions")
+        self.assertEqual(captured["body"]["model"], "gpt-4o-mini")
+        self.assertEqual(captured["auth"], "Bearer sk-x")
+
+    def test_defaults_when_url_and_model_empty(self):
+        captured = {}
+
+        def fake_urlopen(req, timeout=0):
+            captured["url"] = req.full_url
+            captured["body"] = json.loads(req.data.decode("utf-8"))
+            return _FakeResponse(
+                {"choices": [{"message": {"content": "{}"}}]})
+
+        with mock.patch("app.core.ai_scan.urllib.request.urlopen", fake_urlopen):
+            default_caller([], "sk-x")
+        self.assertEqual(captured["url"], DEFAULT_API_URL)
+        self.assertEqual(captured["body"]["model"], DEFAULT_MODEL)
+
+    def test_400_retries_with_minimal_body(self):
+        # 不支持 JSON 模式/temperature 的兼容服务返回 400 → 去掉可选字段重试。
+        bodies = []
+
+        def fake_urlopen(req, timeout=0):
+            body = json.loads(req.data.decode("utf-8"))
+            bodies.append(body)
+            if "response_format" in body:
+                raise urllib.error.HTTPError(req.full_url, 400, "Bad Request",
+                                             {}, None)
+            return _FakeResponse(
+                {"choices": [{"message": {"content": "ok"}}]})
+
+        with mock.patch("app.core.ai_scan.urllib.request.urlopen", fake_urlopen):
+            out = default_caller([], "sk-x")
+        self.assertEqual(out, "ok")
+        self.assertEqual(len(bodies), 2)
+        self.assertNotIn("response_format", bodies[1])
+        self.assertNotIn("temperature", bodies[1])
 
 
 class RecommendFieldsTest(unittest.TestCase):

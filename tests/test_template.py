@@ -33,6 +33,14 @@ class TestSchema(unittest.TestCase):
     def test_validate_ok(self):
         self.assertEqual(validate(to_dict(make_template())), [])
 
+    def test_filename_source_valid(self):
+        data = to_dict(make_template())
+        data["output_tables"][0]["fields"].append(
+            {"target": "文件名", "source": "filename"})
+        self.assertEqual(validate(data), [])
+        tpl = from_dict(data)
+        self.assertEqual(tpl.output_tables[0].fields[-1].source, "filename")
+
     def test_validate_errors(self):
         self.assertTrue(validate({"name": ""}))
         self.assertTrue(validate({"name": "x", "output_tables": []}))
