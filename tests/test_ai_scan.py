@@ -135,7 +135,7 @@ class TableFormPromptTest(unittest.TestCase):
         self.assertIn("模板自身", user)            # 明确忽略表单管理信息
 
     def test_ideal_table_form_mapping(self):
-        # 模拟 107-1 表：表头「项目名称」在 (6,3)，三个数据行在 12/13/14 行第 3 列。
+        # 模拟表头型表格：表头「项目名称」在 (6,3)，三个数据行在 12/13/14 行第 3 列。
         grid = [[None] * 3 for _ in range(14)]
         grid[5][2] = "项目名称"   # (6,3)
         grid[11][2] = "项目甲"     # (12,3)

@@ -11,11 +11,11 @@ from app.template.store import delete, duplicate, load, rename, save, save_path
 
 def make_template():
     return ExtractTemplate(
-        name="研发报表107汇总",
+        name="研发报表汇总",
         output_tables=[
             OutputTable(
                 name="项目汇总",
-                sheet=SheetConfig(sheet_keyword="107-1"),
+                sheet=SheetConfig(sheet_keyword="项目表"),
                 fields=[FieldMapping(target="企业名称", source="kv", key="单位详细名称"),
                         FieldMapping(target="项目经费", source="kv", key="项目经费",
                                      value_row=4, value_col=13, value_type="number")],

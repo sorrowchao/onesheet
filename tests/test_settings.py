@@ -185,7 +185,7 @@ class SettingsTest(unittest.TestCase):
     def test_folder_import_options_round_trip(self):
         opts = {"recursive": False, "per_folder_limit": 2,
                 "sort_by": "size_smallest", "min_size": 10,
-                "max_size": 20, "name_pattern": "107"}
+                "max_size": 20, "name_pattern": "报表"}
         settings.set_folder_import_options(opts, self.dir)
         self.assertEqual(settings.get_folder_import_options(self.dir), opts)
 

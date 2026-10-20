@@ -5,7 +5,7 @@ import unittest
 from app.core.ai_scan import AiScanError
 from app.core.pdf_reader import PdfScanError, VisionConfig, read_pdf
 
-LONG_TEXT = "单位详细名称 国能混凝土有限公司 项目名称 测试项目 数量 1000 单位 个"
+LONG_TEXT = "单位详细名称 X企业有限公司 项目名称 测试项目 数量 1000 单位 个"
 
 
 class FakeOriginal:
@@ -69,24 +69,24 @@ class TextPageTest(unittest.TestCase):
     def test_extracts_tables_first(self):
         page = FakePage(
             text=LONG_TEXT,
-            tables=[[["单位详细名称", "国能混凝土"], ["项目名称", "测试项目"]]],
+            tables=[[["单位详细名称", "X企业"], ["项目名称", "测试项目"]]],
             words=[{"text": "不应被使用", "x0": 0, "x1": 10, "top": 0}],
         )
         sheets = read_pdf("x.pdf", pdf_open=_opener(page))
         self.assertEqual([s.name for s in sheets], ["表1"])
-        self.assertEqual(sheets[0].grid, [["单位详细名称", "国能混凝土"],
+        self.assertEqual(sheets[0].grid, [["单位详细名称", "X企业"],
                                           ["项目名称", "测试项目"]])
 
     def test_layout_when_no_tables(self):
         page = FakePage(text=LONG_TEXT, words=[
             {"text": "单位详细名称", "x0": 0, "x1": 48, "top": 10},
-            {"text": "国能混凝土", "x0": 80, "x1": 140, "top": 10},
+            {"text": "X企业", "x0": 80, "x1": 140, "top": 10},
             {"text": "项目名称", "x0": 0, "x1": 40, "top": 30},
             {"text": "测试项目", "x0": 80, "x1": 120, "top": 30},
         ])
         sheets = read_pdf("x.pdf", pdf_open=_opener(page))
         self.assertEqual(sheets[0].name, "正文")
-        self.assertEqual(sheets[0].grid, [["单位详细名称", "国能混凝土"],
+        self.assertEqual(sheets[0].grid, [["单位详细名称", "X企业"],
                                           ["项目名称", "测试项目"]])
 
     def test_single_cell_row_with_colon_splits(self):
@@ -165,7 +165,7 @@ class ScanPageTest(unittest.TestCase):
         captured = {}
         page = FakePage(text="")   # 没有文字层 → 扫描页
         reply = json.dumps({"rows": [
-            ["单位详细名称", "国能混凝土"],
+            ["单位详细名称", "X企业"],
             ["项目名称", "测试"],
             [""],
         ]}, ensure_ascii=False)
@@ -175,7 +175,7 @@ class ScanPageTest(unittest.TestCase):
             caller=self._caller(reply, captured))
 
         self.assertEqual(sheets[0].name, "扫描")
-        self.assertEqual(sheets[0].grid, [["单位详细名称", "国能混凝土"],
+        self.assertEqual(sheets[0].grid, [["单位详细名称", "X企业"],
                                           ["项目名称", "测试"]])
         self.assertEqual(captured["api_key"], "k")
         self.assertEqual(captured["model"], "gpt-4o")

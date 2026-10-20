@@ -24,8 +24,8 @@ def _chinese_only(text: str) -> str:
 def object_name_from_path(path: str | None) -> str:
     """从路径取「对象名」：优先文件名的汉字；文件名没有汉字时用所在文件夹名。
 
-    例：`…/国能混凝土107-1.xlsx` → 「国能混凝土」；
-        `…/采购部/107-1.xlsx` → 「采购部」。
+    例：`…/X企业2024.xlsx` → 「企业」；
+        `…/采购部/2024.xlsx` → 「采购部」。
     """
     if not path:
         return ""

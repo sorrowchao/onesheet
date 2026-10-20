@@ -36,7 +36,7 @@ class ImportFolderDialogTest(unittest.TestCase):
         _make(self.root, "s1/d.xlsx", 30, 300)
         _make(self.root, "s1/e.xlsx", 40, 400)
         _make(self.root, "s2/big.xlsx", 2 * MB, 500)
-        _make(self.root, "s2/国能107-1.xlsx", 60, 600)
+        _make(self.root, "s2/X企业2024.xlsx", 60, 600)
         self.dlg = ImportFolderDialog(str(self.root))
         self.dlg._refresh_preview()
 
@@ -57,7 +57,7 @@ class ImportFolderDialogTest(unittest.TestCase):
         self.assertEqual(self._names(), [
             "b.xls", "a.xlsx",
             "s1/e.xlsx", "s1/d.xlsx",
-            "s2/国能107-1.xlsx", "s2/big.xlsx",
+            "s2/X企业2024.xlsx", "s2/big.xlsx",
         ])
         self.assertEqual(
             self.dlg.summary_label.text(), "将导入 6 个文件（来自 3 个文件夹）")
@@ -78,7 +78,7 @@ class ImportFolderDialogTest(unittest.TestCase):
         self.dlg.limit_spin.setValue(1)
         self.dlg._refresh_preview()
         self.assertEqual(self._names(), [
-            "b.xls", "s1/e.xlsx", "s2/国能107-1.xlsx"])
+            "b.xls", "s1/e.xlsx", "s2/X企业2024.xlsx"])
 
     def test_sort_choice_changes_order(self):
         idx = self.dlg.sort_combo.findData(SORT_NAME_ASC)
@@ -87,7 +87,7 @@ class ImportFolderDialogTest(unittest.TestCase):
         self.assertEqual(self._names(), [
             "a.xlsx", "b.xls",
             "s1/d.xlsx", "s1/e.xlsx",
-            "s2/big.xlsx", "s2/国能107-1.xlsx",
+            "s2/big.xlsx", "s2/X企业2024.xlsx",
         ])
 
     def test_min_size_filter(self):
@@ -101,13 +101,13 @@ class ImportFolderDialogTest(unittest.TestCase):
         self.assertEqual(self._names(), [
             "b.xls", "a.xlsx",
             "s1/e.xlsx", "s1/d.xlsx",
-            "s2/国能107-1.xlsx",
+            "s2/X企业2024.xlsx",
         ])
 
     def test_name_pattern_filters_file_name_only(self):
-        self.dlg.pattern_edit.setText("107-1")
+        self.dlg.pattern_edit.setText("2024")
         self.dlg._refresh_preview()
-        self.assertEqual(self._names(), ["s2/国能107-1.xlsx"])
+        self.assertEqual(self._names(), ["s2/X企业2024.xlsx"])
 
     def test_invalid_regex_disables_ok(self):
         self.dlg.pattern_edit.setText("[")

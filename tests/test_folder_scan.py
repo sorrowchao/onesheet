@@ -190,7 +190,7 @@ class NormalizeOptionsTest(unittest.TestCase):
             "sort_by": SORT_SIZE_SMALLEST,
             "min_size": 10,
             "max_size": 20,
-            "name_pattern": "107",
+            "name_pattern": "报表",
         }
         opts = normalize_options(raw)
         self.assertEqual(opts, raw)

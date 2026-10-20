@@ -44,7 +44,7 @@ def build_sheet_text(sheet: SheetData, max_rows: int = 200, max_cols: int = 40) 
 
     每行形如 `行N: 列=值 | 列=值 | …`，只列出非空格（行号、列号 1 起）。
     显式写出每格的列号，模型不必靠数制表符去猜列位——稀疏表（大片空格）
-    最容易在这儿列号漂移（107-2 曾把「数量」列 10 数成空列 7）。
+    最容易在这儿列号漂移（曾把「数量」列 10 数成空列 7）。
     """
     grid = sheet.grid
     total_rows = len(grid)

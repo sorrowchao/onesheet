@@ -126,13 +126,13 @@ class TestFilenameField(unittest.TestCase):
 
     def test_object_name_keeps_only_chinese(self):
         self.assertEqual(
-            object_name_from_path("C:/data/国能混凝土107-1.xlsx"), "国能混凝土")
+            object_name_from_path("C:/data/X企业2024.xlsx"), "企业")
         self.assertEqual(
             object_name_from_path("C:/data/ABC-采购部-2024v2.xlsx"), "采购部")
 
     def test_object_name_falls_back_to_folder(self):
         self.assertEqual(
-            object_name_from_path("C:/data/采购部/107-1.xlsx"), "采购部")
+            object_name_from_path("C:/data/采购部/2024.xlsx"), "采购部")
 
     def test_object_name_empty_when_no_chinese(self):
         self.assertEqual(object_name_from_path("C:/data/reports/2024-01.xlsx"), "")
@@ -140,15 +140,15 @@ class TestFilenameField(unittest.TestCase):
     def test_extract_filename_field(self):
         f = FieldMapping(target="文件名", source="filename")
         rt = extract_file([FORM_SHEET], make_template([f]),
-                          "C:/data/国能混凝土107-1.xlsx")["汇总"]
+                          "C:/data/X企业2024.xlsx")["汇总"]
         self.assertEqual(rt.columns, ["文件名"])
-        self.assertEqual(rt.rows, [["国能混凝土"]])
+        self.assertEqual(rt.rows, [["企业"]])
 
     def test_extract_filename_with_kv_field(self):
         fields = [FieldMapping(target="文件名", source="filename"),
                   FieldMapping(target="姓名", source="kv", key="姓名")]
         rt = extract_file([FORM_SHEET], make_template(fields),
-                          "C:/data/采购部/107-1.xlsx")["汇总"]
+                          "C:/data/采购部/2024.xlsx")["汇总"]
         self.assertEqual(rt.rows, [["采购部", "张三"]])
 
     def test_extract_without_path_yields_empty(self):

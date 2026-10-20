@@ -283,7 +283,7 @@ class FilenameFieldTest(unittest.TestCase):
     def setUp(self):
         self.panel = ConfigPanel()
         self.panel.set_form_fields(_fields("A"))
-        self.panel.set_current_file("C:/data/国能混凝土107-1.xlsx")
+        self.panel.set_current_file("C:/data/X企业2024.xlsx")
 
     def tearDown(self):
         self.panel.deleteLater()
@@ -299,7 +299,7 @@ class FilenameFieldTest(unittest.TestCase):
         self.assertIsNone(f.value_row)
         self.assertIsNone(f.value_col)
         self.assertEqual(self.panel.fields_table.rowCount(), 2)
-        self.assertEqual(self.panel.fields_table.item(1, 4).text(), "国能混凝土")
+        self.assertEqual(self.panel.fields_table.item(1, 4).text(), "企业")
 
     def test_position_cells_not_editable(self):
         self.panel._add_filename_field()
@@ -315,7 +315,7 @@ class FilenameFieldTest(unittest.TestCase):
         self.assertEqual(count, 1)
 
     def test_preview_falls_back_to_folder(self):
-        self.panel.set_current_file("C:/data/采购部/107-1.xlsx")
+        self.panel.set_current_file("C:/data/采购部/2024.xlsx")
         self.panel._add_filename_field()
         f = self.panel._form_fields[-1]
         self.assertEqual(self.panel._preview_text(f), "采购部")

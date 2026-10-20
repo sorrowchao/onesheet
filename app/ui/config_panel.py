@@ -185,7 +185,7 @@ class ConfigPanel(QWidget):
         self.btn_add_filename = QPushButton("添加文件名")
         self.btn_add_filename.setToolTip(
             "添加「文件名」列：取文件名里的汉字；文件名没有汉字时取所在文件夹名。\n"
-            "例：国能混凝土107-1.xlsx → 国能混凝土；采购部/107-1.xlsx → 采购部")
+            "例：X企业2024.xlsx → 企业；采购部/2024.xlsx → 采购部")
         self.btn_add_filename.clicked.connect(self._add_filename_field)
         for b in (self.btn_scan, self.btn_ai, self.btn_pair,
                   btn_add_f, self.btn_add_filename):

@@ -36,7 +36,7 @@ def _make_docx(path: Path) -> str:
     doc.add_paragraph("性别：男")
     table = doc.add_table(rows=2, cols=2)
     table.cell(0, 0).text = "单位详细名称"
-    table.cell(0, 1).text = "国能混凝土"
+    table.cell(0, 1).text = "X企业"
     table.cell(1, 0).text = "项目名称"
     table.cell(1, 1).text = "测试项目"
     doc.save(path)
@@ -95,11 +95,11 @@ class DetectFormatTest(TempDirTest):
 class CsvReaderTest(TempDirTest):
     def test_utf8_bom_chinese(self):
         path = _write(self.root / "a.csv",
-                      "姓名,单位\n张三,国能\n".encode("utf-8-sig"))
+                      "姓名,单位\n张三,X企业\n".encode("utf-8-sig"))
         sheets = read_csv(path)
         self.assertEqual(len(sheets), 1)
         self.assertEqual(sheets[0].name, "CSV")
-        self.assertEqual(sheets[0].grid, [["姓名", "单位"], ["张三", "国能"]])
+        self.assertEqual(sheets[0].grid, [["姓名", "单位"], ["张三", "X企业"]])
 
     def test_gb18030(self):
         path = _write(self.root / "a.csv", "姓名,值\n张三,1\n".encode("gb18030"))
@@ -136,7 +136,7 @@ class DocxReaderTest(TempDirTest):
     def test_tables_and_paragraphs(self):
         sheets = read_docx(_make_docx(self.root / "a.docx"))
         self.assertEqual([s.name for s in sheets], ["表1", "正文"])
-        self.assertEqual(sheets[0].grid, [["单位详细名称", "国能混凝土"],
+        self.assertEqual(sheets[0].grid, [["单位详细名称", "X企业"],
                                           ["项目名称", "测试项目"]])
         self.assertEqual(sheets[1].grid, [["姓名", "张三"], ["性别", "男"]])
 

@@ -92,7 +92,7 @@ class ImportFolderDialog(QDialog):
 
         self.pattern_edit = QLineEdit()
         self.pattern_edit.setClearButtonEnabled(True)
-        self.pattern_edit.setPlaceholderText(r"例如：107-1|明细")
+        self.pattern_edit.setPlaceholderText(r"例如：项目|明细")
         self.pattern_edit.setToolTip(
             "对文件名（含扩展名）做正则搜索 re.search；默认区分大小写，可写 (?i) 忽略大小写。")
         form.addRow("文件名正则", self.pattern_edit)

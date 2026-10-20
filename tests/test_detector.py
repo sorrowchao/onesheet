@@ -24,7 +24,7 @@ class TestDetect(unittest.TestCase):
         self.assertEqual(d, Region(4, 1, -1, 1))
 
     def test_kv_table(self):
-        # 107-2 式：单行即表头 + 数据
+        # 纵向指标表式：单行即表头 + 数据
         grid = [
             ["研究开发人员合计", None, 1, None, 10],
             ["研究开发费用合计", None, 7, None, 500],
