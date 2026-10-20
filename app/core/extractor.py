@@ -84,7 +84,7 @@ def _same_type_groups(fields) -> list[list]:
 
     横向表格里，同一个表头（label_row/label_col）会对应多行数据
     （如 项目名称1/2/3），它们取值列相同、取值行递增。只有成组（≥2 个）
-    才视为同类行，避免把普通标签（如单位详细名称）也向下扩展。
+    才视为同类行，避免把普通标签（如单位名称）也向下扩展。
     """
     groups: dict[tuple, list] = {}
     for f in fields:

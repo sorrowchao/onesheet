@@ -121,11 +121,11 @@ class TableFormPromptTest(unittest.TestCase):
 
     def test_newline_cells_do_not_break_rows(self):
         # 单元格内的换行必须被压平，否则「一行一记录」会错位、行号对不上。
-        grid = [["项目名称", "项目研究开发人员\n（人）"], ["甲", "5"]]
+        grid = [["项目名称", "项目人员\n（人）"], ["甲", "5"]]
         sheet = SheetData(name="s", grid=grid, merged=[], max_row=2, max_col=2)
         lines = build_sheet_text(sheet).splitlines()
         self.assertEqual(len(lines), 2)  # 一行一记录
-        self.assertIn("2=项目研究开发人员 （人）", lines[0])
+        self.assertIn("2=项目人员 （人）", lines[0])
 
     def test_prompt_describes_three_layouts(self):
         user = build_messages("x")[1]["content"]

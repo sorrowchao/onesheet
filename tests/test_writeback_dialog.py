@@ -11,7 +11,7 @@ from app.main_window import WriteBackDialog
 # 必须在构造任何 QWidget 之前创建 QApplication。
 _app = QApplication.instance() or QApplication(sys.argv)
 
-COLS = ["序号", "单位详细名称", "项目经费", "姓名"]
+COLS = ["序号", "单位名称", "项目经费", "姓名"]
 
 
 def _table(rows):
@@ -23,7 +23,7 @@ def _output_table(key: bool):
         name="t",
         sheet=SheetConfig(),
         fields=[
-            FieldMapping(target="单位详细名称", is_key=key, value_row=5, value_col=2),
+            FieldMapping(target="单位名称", is_key=key, value_row=5, value_col=2),
             FieldMapping(target="项目经费", value_row=7, value_col=13),
             FieldMapping(target="姓名", value_row=2, value_col=2),
         ],
@@ -41,19 +41,19 @@ class WriteBackDefaultTest(unittest.TestCase):
     def test_key_checked_others_not(self):
         rt = _table([[1, "A厂", 10, "张三"]])
         dlg = self._dialog(_output_table(key=True), rt, rt)
-        self.assertEqual(self._checked(dlg), ["单位详细名称"])
-        self.assertEqual(dlg.key_cols(), [1])  # COLS 中「单位详细名称」的下标
+        self.assertEqual(self._checked(dlg), ["单位名称"])
+        self.assertEqual(dlg.key_cols(), [1])  # COLS 中「单位名称」的下标
 
     def test_no_key_all_unchanged_checked(self):
         rt = _table([[1, "A厂", 10, "张三"]])
         dlg = self._dialog(_output_table(key=False), rt, rt)
-        self.assertEqual(self._checked(dlg), ["单位详细名称", "项目经费", "姓名"])
+        self.assertEqual(self._checked(dlg), ["单位名称", "项目经费", "姓名"])
 
     def test_no_key_changed_column_unchecked(self):
         original = _table([[1, "A厂", 10, "张三"]])
         edited = _table([[1, "A厂", 99, "张三"]])  # 改动了「项目经费」
         dlg = self._dialog(_output_table(key=False), edited, original)
-        self.assertEqual(self._checked(dlg), ["单位详细名称", "姓名"])
+        self.assertEqual(self._checked(dlg), ["单位名称", "姓名"])
 
     def test_summary_file_disabled_for_current_results(self):
         rt = _table([[1, "A厂", 10, "张三"]])
@@ -74,7 +74,7 @@ class WriteBackDefaultTest(unittest.TestCase):
         original = _table([[1, "A厂", 10, "张三"]])
         edited = _table([[1, "B厂", 10, "张三"]])
         dlg = self._dialog(_output_table(key=True), edited, original)
-        self.assertEqual(self._checked(dlg), ["单位详细名称"])
+        self.assertEqual(self._checked(dlg), ["单位名称"])
 
 
 if __name__ == "__main__":

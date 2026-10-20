@@ -4,7 +4,7 @@
 
 **当前版本：v2.0** · [更新日志](CHANGELOG.md) · [下载 Release](https://github.com/sorrowchao/onesheet/releases/latest)
 
-Windows 桌面应用（PySide6），单机本地运行，无需服务端。适用于「单位详细名称：……」「姓名：张三」这类表单、统计报表的批量整理。
+Windows 桌面应用（PySide6），单机本地运行，无需服务端。适用于「单位名称：……」「姓名：张三」这类表单、统计报表的批量整理。
 
 ## 功能
 

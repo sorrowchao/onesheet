@@ -14,7 +14,7 @@ class TestDetect(unittest.TestCase):
     def test_title_then_blank_then_header(self):
         # 元数据行 → 空行 → 表头 → 数据
         grid = [
-            ["单位详细名称", None, "测试企业", 2024],
+            ["单位名称", None, "测试企业", 2024],
             [None, None, None, None],
             ["甲", None, None, None],
             [1, None, "项目A", 123.5],
@@ -26,8 +26,8 @@ class TestDetect(unittest.TestCase):
     def test_kv_table(self):
         # 纵向指标表式：单行即表头 + 数据
         grid = [
-            ["研究开发人员合计", None, 1, None, 10],
-            ["研究开发费用合计", None, 7, None, 500],
+            ["人员合计", None, 1, None, 10],
+            ["费用合计", None, 7, None, 500],
         ]
         h, d = detect(make_sheet(grid))
         self.assertEqual(h, Region(1, 1, 1, 5))

@@ -35,7 +35,7 @@ def _make_docx(path: Path) -> str:
     doc.add_paragraph("姓名：张三")
     doc.add_paragraph("性别：男")
     table = doc.add_table(rows=2, cols=2)
-    table.cell(0, 0).text = "单位详细名称"
+    table.cell(0, 0).text = "单位名称"
     table.cell(0, 1).text = "X企业"
     table.cell(1, 0).text = "项目名称"
     table.cell(1, 1).text = "测试项目"
@@ -136,7 +136,7 @@ class DocxReaderTest(TempDirTest):
     def test_tables_and_paragraphs(self):
         sheets = read_docx(_make_docx(self.root / "a.docx"))
         self.assertEqual([s.name for s in sheets], ["表1", "正文"])
-        self.assertEqual(sheets[0].grid, [["单位详细名称", "X企业"],
+        self.assertEqual(sheets[0].grid, [["单位名称", "X企业"],
                                           ["项目名称", "测试项目"]])
         self.assertEqual(sheets[1].grid, [["姓名", "张三"], ["性别", "男"]])
 

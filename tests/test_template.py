@@ -16,7 +16,7 @@ def make_template():
             OutputTable(
                 name="项目汇总",
                 sheet=SheetConfig(sheet_keyword="项目表"),
-                fields=[FieldMapping(target="企业名称", source="kv", key="单位详细名称"),
+                fields=[FieldMapping(target="企业名称", source="kv", key="单位名称"),
                         FieldMapping(target="项目经费", source="kv", key="项目经费",
                                      value_row=4, value_col=13, value_type="number")],
             ),
