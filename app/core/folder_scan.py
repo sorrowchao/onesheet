@@ -104,6 +104,8 @@ def _rank_key(sort_by: str, path: Path, rel: str, size: int, mtime: float):
 
 def _collect(path: Path, root: Path, pattern, min_size: int, max_size: int):
     """单个候选文件 → (path, 相对路径 Path, 大小, mtime)；不满足条件返回 None。"""
+    if path.name.startswith("~$"):  # Office 打开文件时生成的临时锁文件
+        return None
     if path.suffix.lower() not in INPUT_EXTS:
         return None
     st = _safe_stat(path)

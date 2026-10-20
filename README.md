@@ -2,7 +2,7 @@
 
 > 多表归一：从 Excel / Word / PDF / CSV 中批量抽取「表单（标签:值）」数据，汇总成一张表，再把校对后的值反向写回 Excel 源文件。
 
-**当前版本：v2.0** · [更新日志](CHANGELOG.md) · [下载 Release](https://github.com/sorrowchao/onesheet/releases/latest)
+**当前版本：v2.1** · [更新日志](CHANGELOG.md) · [下载 Release](https://github.com/sorrowchao/onesheet/releases/latest)
 
 Windows 桌面应用（PySide6），单机本地运行，无需服务端。适用于「单位名称：……」「姓名：张三」这类表单、统计报表的批量整理。
 

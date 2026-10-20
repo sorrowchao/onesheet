@@ -92,6 +92,12 @@ class FolderScanTest(unittest.TestCase):
         _make(self.root, "zero/z.xlsx", 0, 50)
         self.assertIn("zero/z.xlsx", self._scan())
 
+    def test_office_lock_files_ignored(self):
+        _make(self.root, "~$a.xlsx", 10, 999)
+        _make(self.root, "s1/~$d.xlsx", 10, 999)
+        self.assertNotIn("~$a.xlsx", self._scan())
+        self.assertNotIn("s1/~$d.xlsx", self._scan())
+
     def test_regex_matches_file_name_only(self):
         _make(self.root, "prefix_dir/plain.xlsx", 5, 50)
         self.assertEqual(self._scan(name_pattern="prefix_dir"), [])

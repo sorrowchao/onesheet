@@ -8,6 +8,29 @@ from unittest import mock
 from app import paths
 
 
+class EnsureDataDirsTest(unittest.TestCase):
+    def test_creates_data_and_subdirs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "data"
+            self.assertEqual(paths.ensure_data_dirs(base), base)
+            for name in ("templates", "logs", "icons"):
+                self.assertTrue((base / name).is_dir())
+
+    def test_existing_content_preserved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "data"
+            (base / "templates").mkdir(parents=True)
+            (base / "templates" / "t.json").write_text("{}", encoding="utf-8")
+            paths.ensure_data_dirs(base)
+            self.assertEqual((base / "templates" / "t.json").read_text(encoding="utf-8"), "{}")
+
+    def test_mkdir_failure_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            blocker = Path(tmp) / "data"
+            blocker.write_text("", encoding="utf-8")  # 同名文件占位，无法建目录
+            paths.ensure_data_dirs(blocker)  # 不抛异常
+
+
 class FrozenBaseTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

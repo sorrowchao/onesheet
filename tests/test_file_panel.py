@@ -44,10 +44,10 @@ class FilePanelTest(unittest.TestCase):
         self.assertEqual(self.panel.checked_files(), ["b.xlsx"])
 
     def test_invert_checks_with_filter_only_affects_visible(self):
-        self.panel.add_files(["X企业1.xlsx", "X企业2.xlsx", "祥瑞1.xlsx"])
+        self.panel.add_files(["X企业1.xlsx", "X企业2.xlsx", "Y企业1.xlsx"])
         self.panel.search.setText("X企业")
         self.panel._invert_checks()   # 两个匹配项取消勾选，隐藏项保持
-        self.assertEqual(self.panel.checked_files(), ["祥瑞1.xlsx"])
+        self.assertEqual(self.panel.checked_files(), ["Y企业1.xlsx"])
 
     def test_remove_checked_only_removes_checked(self):
         self.panel.add_files(["a.xlsx", "b.xlsx", "c.xlsx"])
@@ -75,7 +75,7 @@ class FilePanelTest(unittest.TestCase):
         self.assertEqual(self.panel.files(), ["a.xlsx", "b.xlsx"])
 
     def test_filter_hides_non_matching(self):
-        self.panel.add_files(["X企业1.xlsx", "X企业2.xlsx", "祥瑞1.xlsx"])
+        self.panel.add_files(["X企业1.xlsx", "X企业2.xlsx", "Y企业1.xlsx"])
         self.panel.search.setText("X企业")
         visible = [i.text() for i in self.panel._visible_items()]
         self.assertEqual(visible, ["X企业1.xlsx", "X企业2.xlsx"])
@@ -94,7 +94,7 @@ class FilePanelTest(unittest.TestCase):
         self.assertEqual(len(self.panel._visible_items()), 2)
 
     def test_select_all_with_filter_only_selects_matches(self):
-        self.panel.add_files(["X企业1.xlsx", "X企业2.xlsx", "祥瑞1.xlsx"])
+        self.panel.add_files(["X企业1.xlsx", "X企业2.xlsx", "Y企业1.xlsx"])
         self.panel.search.setText("X企业")
         self.panel._select_all()
         self.assertEqual(self.panel.checked_files(), ["X企业1.xlsx", "X企业2.xlsx"])
@@ -106,14 +106,14 @@ class FilePanelTest(unittest.TestCase):
         self.assertEqual(self.panel.checked_files(), ["a.xlsx", "b.xlsx"])
 
     def test_deselect_all_with_filter_only_unchecks_matches(self):
-        self.panel.add_files(["X企业1.xlsx", "祥瑞1.xlsx"])
+        self.panel.add_files(["X企业1.xlsx", "Y企业1.xlsx"])
         self.panel.search.setText("X企业")
         self.panel._deselect_all()
-        self.assertEqual(self.panel.checked_files(), ["祥瑞1.xlsx"])
+        self.assertEqual(self.panel.checked_files(), ["Y企业1.xlsx"])
 
     def test_add_files_respects_active_filter(self):
         self.panel.search.setText("X企业")
-        self.panel.add_files(["X企业1.xlsx", "祥瑞1.xlsx"])
+        self.panel.add_files(["X企业1.xlsx", "Y企业1.xlsx"])
         visible = [i.text() for i in self.panel._visible_items()]
         self.assertEqual(visible, ["X企业1.xlsx"])
 
@@ -134,7 +134,7 @@ class FilePanelTest(unittest.TestCase):
         self.assertEqual(self.panel.checked_files(), [full])
 
     def test_filter_matches_display_name(self):
-        self.panel.add_files(["dir1/X企业1.xlsx", "dir2/祥瑞1.xlsx"])
+        self.panel.add_files(["dir1/X企业1.xlsx", "dir2/Y企业1.xlsx"])
         self.panel.search.setText("X企业")
         self.assertEqual([i.text() for i in self.panel._visible_items()], ["X企业1.xlsx"])
         self.panel._select_all()

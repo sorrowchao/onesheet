@@ -41,6 +41,24 @@ def data_dir() -> Path:
     return base_dir() / "data"
 
 
+DATA_SUBDIRS = ("templates", "logs", "icons")
+
+
+def ensure_data_dirs(base: Path | None = None) -> Path:
+    """首次启动时创建 data/ 及常用子目录（模板/日志/用户图标）。
+
+    创建失败（如程序装在只读目录）时静默忽略，不影响只读功能。
+    """
+    target = data_dir() if base is None else Path(base)
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        for name in DATA_SUBDIRS:
+            (target / name).mkdir(exist_ok=True)
+    except OSError:
+        pass
+    return target
+
+
 def resource_dir() -> Path:
     """只读资源根目录（`app/icons` 等随程序打包的资源所在处）。
 

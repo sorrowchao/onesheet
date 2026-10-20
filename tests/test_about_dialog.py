@@ -26,8 +26,8 @@ class AboutDialogTest(unittest.TestCase):
         self.assertIn("Excel / Word / PDF / CSV", joined)
 
     def test_version(self):
-        self.assertEqual(__version__, "2.0")
-        self.assertIn("版本 2.0", "\n".join(self.texts))
+        self.assertEqual(__version__, "2.1")
+        self.assertIn("版本 2.1", "\n".join(self.texts))
 
     def test_code_attribution(self):
         self.assertIn("忧凉 & DeepSeek-V4.1-Flash-1017", "\n".join(self.texts))
