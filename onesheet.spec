@@ -1,7 +1,25 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller 打包配置：onefile + 无控制台 GUI。
 
+import os
+
 from PyInstaller.utils.hooks import collect_dynamic_libs
+
+# exe/任务栏图标与「视图 → 应用图标」保持同步：每次打包都从默认图标
+# app/icons/4.png 重新生成多尺寸 onesheet.ico（16~256），避免图标文件过期。
+_ICON_SRC = 'app/icons/4.png'
+_ICO_PATH = 'app/ui/assets/onesheet.ico'
+try:
+    from PIL import Image
+except ImportError:          # Pillow 由 pdfplumber 依赖，正常不会缺失
+    Image = None
+if Image is not None and os.path.exists(_ICON_SRC):
+    _icon = Image.open(_ICON_SRC).convert('RGBA')
+    if max(_icon.size) < 256:          # Pillow 不会放大生成 256 尺寸
+        _icon = _icon.resize((256, 256), Image.LANCZOS)
+    _icon.save(_ICO_PATH, format='ICO',
+               sizes=[(16, 16), (24, 24), (32, 32), (48, 48),
+                      (64, 64), (128, 128), (256, 256)])
 
 a = Analysis(
     ['main.py'],

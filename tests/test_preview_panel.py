@@ -39,6 +39,18 @@ class HighlightFieldTest(unittest.TestCase):
         self.assertEqual(self.panel.table.currentRow(), 0)
         self.assertEqual(self.panel.table.currentColumn(), 1)
 
+    def test_offset_moves_selection(self):
+        grid = [["标题", None, None],
+                ["姓名", "张三", "备注"],
+                ["性别", "男", None]]
+        self.panel.set_sheets([SheetData(name="表1", grid=grid, merged=[],
+                                         max_row=3, max_col=3)])
+        field = FieldMapping(target="姓名", key="姓名",
+                             label_row=1, label_col=1,
+                             value_row=1, value_col=2)
+        self.panel.highlight_field(field, (1, 0))
+        self.assertEqual(self._selected(), {(1, 0), (1, 1)})
+
     def test_falls_back_to_label_text_when_no_positions(self):
         field = FieldMapping(target="性别", key="性别")
         self.panel.highlight_field(field)

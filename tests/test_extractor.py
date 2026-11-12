@@ -121,6 +121,81 @@ class TestSameTypeRows(unittest.TestCase):
         self.assertEqual(rt.rows[0][3], "自选")
 
 
+class TestShiftedLayout(unittest.TestCase):
+    """源文件删除顶部行/列后，按标签锚点自动修正坐标。"""
+
+    def test_deleted_top_row_realigns_values(self):
+        shifted = sheet([row[:] for row in FORM_SHEET.grid[1:]])
+        fields = [
+            FieldMapping(target="姓名", key="姓名", label_row=2, label_col=1,
+                         value_row=2, value_col=2),
+            FieldMapping(target="年龄", key="年龄", label_row=3, label_col=1,
+                         value_row=3, value_col=2, value_type="number"),
+        ]
+        rt = extract_file([shifted], make_template(fields))["汇总"]
+        self.assertEqual(rt.rows, [["张三", 34]])
+
+    def test_column_shift_realigns_values(self):
+        shifted = sheet([[None] + row for row in FORM_SHEET.grid])
+        f = FieldMapping(target="姓名", key="姓名", label_row=2, label_col=1,
+                         value_row=2, value_col=2)
+        rt = extract_file([shifted], make_template([f]))["汇总"]
+        self.assertEqual(rt.rows, [["张三"]])
+
+    def test_shifted_overflow_numbering(self):
+        shifted = sheet([row[:] for row in TABLE_SHEET.grid[1:]])
+        fields = [
+            FieldMapping(target="项目名称1", key="项目名称", label_row=2, label_col=2,
+                         value_row=3, value_col=2),
+            FieldMapping(target="项目名称2", key="项目名称", label_row=2, label_col=2,
+                         value_row=4, value_col=2),
+            FieldMapping(target="项目名称3", key="项目名称", label_row=2, label_col=2,
+                         value_row=5, value_col=2),
+        ]
+        rt = extract_file([shifted], make_template(fields))["汇总"]
+        self.assertEqual(rt.rows, [["项目甲", "项目乙", "项目丙\n4. 项目丁"]])
+
+    def test_numbered_keys_align_on_plain_header(self):
+        # 模板来自 AI 横向表格：key 是「项目名称1/2/3」，表头只有「项目名称」
+        shifted = sheet([row[:] for row in TABLE_SHEET.grid[1:]])
+        fields = [
+            FieldMapping(target="项目名称1", key="项目名称1", label_row=2, label_col=2,
+                         value_row=3, value_col=2),
+            FieldMapping(target="项目名称2", key="项目名称2", label_row=2, label_col=2,
+                         value_row=4, value_col=2),
+            FieldMapping(target="项目名称3", key="项目名称3", label_row=2, label_col=2,
+                         value_row=5, value_col=2),
+        ]
+        rt = extract_file([shifted], make_template(fields))["汇总"]
+        self.assertEqual(rt.rows[0][:2], ["项目甲", "项目乙"])
+        self.assertTrue(rt.rows[0][2].startswith("项目丙"))
+
+    def test_notes_report_offset(self):
+        shifted = sheet([row[:] for row in FORM_SHEET.grid[1:]])
+        fields = [FieldMapping(target="姓名", key="姓名", label_row=2, label_col=1,
+                               value_row=2, value_col=2)]
+        notes: list[str] = []
+        extract_file([shifted], make_template(fields), notes=notes)
+        self.assertEqual(len(notes), 1)
+        self.assertIn("行 -1", notes[0])
+
+    def test_no_note_when_aligned(self):
+        fields = [FieldMapping(target="姓名", key="姓名", label_row=2, label_col=1,
+                               value_row=2, value_col=2)]
+        notes: list[str] = []
+        extract_file([FORM_SHEET], make_template(fields), notes=notes)
+        self.assertEqual(notes, [])
+
+    def test_notes_warn_when_labels_missing(self):
+        grid = [["完全不同的表"]]
+        fields = [FieldMapping(target="姓名", key="姓名", label_row=2, label_col=1,
+                               value_row=2, value_col=2)]
+        notes: list[str] = []
+        extract_file([sheet(grid)], make_template(fields), notes=notes)
+        self.assertEqual(len(notes), 1)
+        self.assertIn("未能可靠对齐", notes[0])
+
+
 class TestFilenameField(unittest.TestCase):
     """source="filename"：从文件名/文件夹名取汉字对象名。"""
 

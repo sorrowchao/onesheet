@@ -24,7 +24,7 @@ _WINDOW_FIELD = "window_state"
 _LAST_IMPORT_DIR_FIELD = "last_import_dir"
 _FOLDER_IMPORT_FIELD = "folder_import_options"
 
-DEFAULT_ICON = "1"
+DEFAULT_ICON = "4"
 _ICON_EXTS = {".png", ".ico", ".svg", ".jpg", ".jpeg", ".bmp"}
 
 # 受支持的主题名（避免 settings 反向依赖 UI 层，这里只留一个白名单）。
@@ -265,7 +265,7 @@ def available_icons(dir_path: Path | None = None) -> list[Path]:
 
 def resolve_icon_name(name: str | None = None,
                       dir_path: Path | None = None) -> str:
-    """把图标名解析成实际存在的图标名：优先用传入值，其次默认 1，最后第一个。"""
+    """把图标名解析成实际存在的图标名：优先用传入值，其次默认图标，最后第一个。"""
     files = available_icons(dir_path)
     if not files:
         return ""
@@ -290,7 +290,7 @@ def icon_path(name: str | None = None,
 
 
 def get_icon(dir_path: Path | None = None) -> str:
-    """返回当前图标名（保存在设置里；缺失/无效时回退默认 1 或第一个）。"""
+    """返回当前图标名（保存在设置里；缺失/无效时回退默认图标或第一个）。"""
     value = load_settings(dir_path).get(_ICON_FIELD)
     return resolve_icon_name(value if isinstance(value, str) else None, dir_path)
 

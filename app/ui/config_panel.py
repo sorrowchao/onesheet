@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFormLayout,
                                QScrollArea, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
+from app.core.align import align_sheet
 from app.core.extractor import object_name_from_path
 from app.core.models import (ExtractTemplate, FieldMapping,
                              OutputTable, SheetConfig, SheetData, dedupe_targets)
@@ -48,6 +49,19 @@ class _FieldsTable(QTableWidget):
         if src >= 0:
             self.rows_moved.emit(src, dst)
 
+    def wheelEvent(self, event):
+        # 表格还能滚时只滚表格；到了顶/底（或表格本身无需滚动）才把
+        # 滚轮交给外层配置面板，避免“鼠标停在映射区就滑不动”的死区。
+        bar = self.verticalScrollBar()
+        delta = event.angleDelta().y() or event.pixelDelta().y()
+        at_top = bar.value() <= bar.minimum()
+        at_bottom = bar.value() >= bar.maximum()
+        if (delta > 0 and at_top) or (delta < 0 and at_bottom):
+            event.ignore()   # 交给外层 QScrollArea 滚动整个配置面板
+            return
+        super().wheelEvent(event)
+        event.accept()
+
 
 class ConfigPanel(QWidget):
     template_changed = Signal()
@@ -73,6 +87,7 @@ class ConfigPanel(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        self.scroll = scroll
         outer.addWidget(scroll)
 
         body = QWidget()
@@ -149,7 +164,9 @@ class ConfigPanel(QWidget):
         self.fields_table.itemChanged.connect(self._on_field_item_changed)
         self.fields_table.rows_moved.connect(self._move_field_to)
         self.fields_table.currentCellChanged.connect(self._on_field_selected)
+        # 高度封顶，字段多时由表格自己滚动，而不是把整个配置面板撑高。
         self.fields_table.setMinimumHeight(240)
+        self.fields_table.setMaximumHeight(360)
         self.fields_table.setColumnWidth(0, 44)
         # 首列固定宽度，勾选框用 QSS margin 居中（见 theme.py）。
         self.fields_table.horizontalHeader().setSectionResizeMode(
@@ -252,6 +269,10 @@ class ConfigPanel(QWidget):
             output_tables=self._tables,
         )
 
+    def active_fields(self) -> list[FieldMapping]:
+        """当前结果表的全部候选字段（含未勾选），供坐标对齐取标签锚点。"""
+        return list(self._form_fields)
+
     def _on_field_selected(self, row: int, _col: int,
                            _prev_row: int, _prev_col: int):
         """字段表当前行变化：通知外部在预览区定位该字段。"""
@@ -350,6 +371,7 @@ class ConfigPanel(QWidget):
             self.fields_table.blockSignals(True)
             self.fields_table.setRowCount(len(self._form_fields))
             center = Qt.AlignmentFlag.AlignCenter
+            offset = self._current_offset()
             for r, f in enumerate(self._form_fields):
                 check = QTableWidgetItem()
                 check.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
@@ -370,7 +392,7 @@ class ConfigPanel(QWidget):
                     value_col.setFlags(value_col.flags() & ~Qt.ItemIsEditable)
                 self.fields_table.setItem(r, 2, value_row)
                 self.fields_table.setItem(r, 3, value_col)
-                preview = QTableWidgetItem(self._preview_text(f))
+                preview = QTableWidgetItem(self._preview_text(f, offset))
                 preview.setTextAlignment(center)
                 preview.setFlags(preview.flags() & ~Qt.ItemIsEditable)
                 self.fields_table.setItem(r, 4, preview)
@@ -406,13 +428,22 @@ class ConfigPanel(QWidget):
         self._read_fields_table()
         self.template_changed.emit()
 
-    def _preview_text(self, f: FieldMapping) -> str:
+    def _current_offset(self) -> tuple[int, int]:
+        """当前预览表相对模板的整表偏移（标签锚点投票）。"""
+        if self._sheet is None:
+            return (0, 0)
+        al = align_sheet(self._sheet, self._form_fields)
+        return al.offset
+
+    def _preview_text(self, f: FieldMapping,
+                      offset: tuple[int, int] = (0, 0)) -> str:
         if f.source == "filename":
             return object_name_from_path(self._current_path)
         if f.value_row is None or f.value_col is None or self._sheet is None:
             return ""
         grid = self._sheet.grid
-        r, c = f.value_row - 1, f.value_col - 1
+        r = f.value_row - 1 + offset[0]
+        c = f.value_col - 1 + offset[1]
         if 0 <= r < len(grid) and 0 <= c < len(grid[r]):
             v = grid[r][c]
             return "" if v is None else str(v)
@@ -421,11 +452,12 @@ class ConfigPanel(QWidget):
     def _refresh_value_preview(self):
         self._loading = True
         try:
+            offset = self._current_offset()
             for r in range(self.fields_table.rowCount()):
                 if 0 <= r < len(self._form_fields):
                     item = self.fields_table.item(r, 4)
                     if item is not None:
-                        item.setText(self._preview_text(self._form_fields[r]))
+                        item.setText(self._preview_text(self._form_fields[r], offset))
         finally:
             self._loading = False
 

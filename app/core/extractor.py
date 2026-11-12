@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .align import align_sheet
 from .models import ExtractTemplate, ResultTable, SheetData
 from .detector import detect_form_pairs
 from .reader import find_sheet
@@ -67,15 +68,17 @@ def _convert(value, value_type: str):
 # --------------------------------------------------------------------------
 
 def extract_file(sheets: list[SheetData], template: ExtractTemplate,
-                 path: str | None = None) -> dict[str, ResultTable]:
+                 path: str | None = None,
+                 notes: list[str] | None = None) -> dict[str, ResultTable]:
     """按模板抽取单个文件，返回 {表名: ResultTable}。
 
-    `path` 供 `source="filename"` 的字段取对象名；其他字段不需要。
+    `path` 供 `source="filename"` 的字段取对象名；`notes` 非空时追加
+    每张表的坐标对齐说明（供界面日志展示）。
     """
     result: dict[str, ResultTable] = {}
     for ot in template.output_tables:
         sheet = find_sheet(sheets, ot.sheet.sheet_keyword)
-        result[ot.name] = _extract_form(sheet, ot, path)
+        result[ot.name] = _extract_form(sheet, ot, path, notes=notes)
     return result
 
 
@@ -97,16 +100,18 @@ def _same_type_groups(fields) -> list[list]:
             for g in groups.values() if len(g) >= 2]
 
 
-def _overflow_text(sheet: SheetData, group: list) -> str:
+def _overflow_text(sheet: SheetData, group: list,
+                   row_delta: int = 0, col_delta: int = 0) -> str:
     """从组内最后一个取值行继续向下读同列，把超出的内容编号后换行堆叠。
 
     终止条件：同列遇到空单元格。序号按数据行在表格中的位置连续编号
     （如模板已覆盖第 1~3 项，第 4 行起输出「4. …」）。
+    坐标按 (row_delta, col_delta) 修正到当前文件的实际位置。
     """
-    first_row = group[0].value_row
-    col = group[-1].value_col
+    first_row = group[0].value_row + row_delta
+    col = group[-1].value_col + col_delta
     lines: list[str] = []
-    r = group[-1].value_row + 1
+    r = group[-1].value_row + row_delta + 1
     while r <= sheet.max_row:
         v = _cell(sheet.grid, r - 1, col - 1)
         if _is_empty(v):
@@ -117,7 +122,8 @@ def _overflow_text(sheet: SheetData, group: list) -> str:
 
 
 def _extract_form(sheet: SheetData | None, ot,
-                  path: str | None = None) -> ResultTable:
+                  path: str | None = None,
+                  notes: list[str] | None = None) -> ResultTable:
     """表单模式：按「标签:值」配对取单行多列。
 
     - 手动配对的字段（含 value_row/value_col）：按值位置直接读单元格。
@@ -125,9 +131,23 @@ def _extract_form(sheet: SheetData | None, ot,
     - 没有配置字段时：输出全部自动识别到的标签:值。
     - 同类行（横向表格同一列的多个字段）超出模板覆盖行仍有内容时，
       追加到该组最后一个字段的单元格里，换行堆叠并加序号。
+    - 源文件删除了顶部行/列时，用模板里的标签锚点自动修正整表偏移。
     """
     if sheet is None:
         return ResultTable(name=ot.name, columns=[], rows=[])
+
+    alignment = align_sheet(sheet, ot.fields)
+    row_delta, col_delta = alignment.offset
+    if notes is not None and ot.fields:
+        if alignment.shifted and alignment.reliable:
+            notes.append(
+                f"「{ot.name}」按标签对齐：行 {row_delta:+d}，列 {col_delta:+d}"
+                f"（{alignment.votes}/{alignment.anchor_count} 个标签命中）")
+        elif alignment.anchor_count and not alignment.reliable:
+            notes.append(
+                f"「{ot.name}」疑似版式变化，未能可靠对齐"
+                f"（{alignment.votes}/{alignment.anchor_count} 个标签命中），"
+                "已按模板原位置读取")
 
     pairs = detect_form_pairs(sheet)
     label_to_val = dict(pairs)
@@ -140,15 +160,17 @@ def _extract_form(sheet: SheetData | None, ot,
         values += [v for _, v in pairs]
         return ResultTable(name=ot.name, columns=columns, rows=[values])
 
-    overflow = {id(g[-1]): _overflow_text(sheet, g)
+    overflow = {id(g[-1]): _overflow_text(sheet, g, row_delta, col_delta)
                 for g in _same_type_groups(ot.fields)}
     for f in ot.fields:
         columns.append(f.target)
         if f.source == _SOURCE_FILENAME:
             value = object_name_from_path(path)
         elif f.value_row is not None and f.value_col is not None:
-            value = _convert(_cell(sheet.grid, f.value_row - 1, f.value_col - 1),
-                             f.value_type)
+            value = _convert(
+                _cell(sheet.grid, f.value_row - 1 + row_delta,
+                      f.value_col - 1 + col_delta),
+                f.value_type)
         else:
             value = _convert(label_to_val.get(f.key), f.value_type)
         extra = overflow.get(id(f))

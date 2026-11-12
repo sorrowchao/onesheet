@@ -451,6 +451,114 @@ class TestReadSummary(unittest.TestCase):
             self.assertEqual(rt.rows, [["张三", "男", 30], ["李四", "女", 25]])
 
 
+def make_labelled_output_table(row_shift: int = 0, col_shift: int = 0):
+    """带标签位置的表（用于对齐测试）；位置可按偏移预置。"""
+    return OutputTable(
+        name="汇总",
+        sheet=SheetConfig(sheet_keyword="工资表"),
+        fields=[
+            FieldMapping(target="姓名", key="姓名", label_row=1 + row_shift,
+                         label_col=1 + col_shift, value_row=1 + row_shift,
+                         value_col=2 + col_shift),
+            FieldMapping(target="性别", key="性别", label_row=2 + row_shift,
+                         label_col=1 + col_shift, value_row=2 + row_shift,
+                         value_col=2 + col_shift),
+            FieldMapping(target="年龄", key="年龄", label_row=3 + row_shift,
+                         label_col=1 + col_shift, value_row=3 + row_shift,
+                         value_col=2 + col_shift),
+        ],
+    )
+
+
+def make_form_xlsx_shifted(path: str, name, gender, age,
+                           top_rows: int = 0, left_cols: int = 0):
+    """同上，但整体下移/右移，模拟源文件与模板排版不一致。"""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "工资表"
+    for i, (label, value) in enumerate((("姓名", name), ("性别", gender),
+                                        ("年龄", age))):
+        ws.cell(row=1 + top_rows + i, column=1 + left_cols).value = label
+        ws.cell(row=1 + top_rows + i, column=2 + left_cols).value = value
+    wb.save(path)
+    wb.close()
+
+
+class TestWriteBackShifted(unittest.TestCase):
+    def test_deleted_top_rows_are_realigned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = str(Path(tmp) / "张三.xlsx")
+            make_form_xlsx(p, "张三", "男", 34)  # 实际只有 3 行
+            tpl = make_labelled_output_table(row_shift=1)  # 模板以为标签从第 2 行开始
+            summary = ResultTable(name="汇总", columns=["姓名", "性别", "年龄"],
+                                  rows=[["张三", "女", 35]])
+            out_dir = str(Path(tmp) / "out")
+            report = write_back([p], tpl, summary, [0], out_dir)
+
+            self.assertEqual(report["errors"], [])
+            self.assertEqual(report["unmatched"], [])
+            self.assertEqual(report["aligned"], [(p, -1, 0)])
+            out = str(Path(out_dir) / "张三.xlsx")
+            self.assertEqual(cell_value(out, 0, 1), "张三")
+            self.assertEqual(cell_value(out, 1, 1), "女")
+            self.assertEqual(cell_value(out, 2, 1), 35)
+
+    def test_column_shift_is_realigned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = str(Path(tmp) / "张三.xlsx")
+            make_form_xlsx_shifted(p, "张三", "男", 34, left_cols=1)
+            tpl = make_labelled_output_table()
+            summary = ResultTable(name="汇总", columns=["姓名", "性别", "年龄"],
+                                  rows=[["张三", "女", 35]])
+            out_dir = str(Path(tmp) / "out")
+            report = write_back([p], tpl, summary, [0], out_dir)
+
+            self.assertEqual(report["errors"], [])
+            self.assertEqual(report["aligned"], [(p, 0, 1)])
+            out = str(Path(out_dir) / "张三.xlsx")
+            self.assertEqual(cell_value(out, 0, 2), "张三")
+            self.assertEqual(cell_value(out, 1, 2), "女")
+            self.assertEqual(cell_value(out, 2, 2), 35)
+
+    def test_preview_reports_aligned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = str(Path(tmp) / "张三.xlsx")
+            make_form_xlsx(p, "张三", "男", 34)
+            tpl = make_labelled_output_table(row_shift=1)
+            summary = ResultTable(name="汇总", columns=["姓名", "性别", "年龄"],
+                                  rows=[["张三", "女", 35]])
+            plan = preview_write_back([p], tpl, summary, [0])
+            self.assertEqual(plan["file_count"], 1)
+            self.assertEqual(plan["cell_count"], 3)
+            self.assertEqual(plan["aligned"], [(p, -1, 0)])
+
+    def test_warns_when_labels_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = str(Path(tmp) / "张三.xlsx")
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "工资表"
+            ws.cell(row=1, column=1).value = "无关内容"
+            wb.save(p)
+            wb.close()
+            tpl = make_labelled_output_table()
+            summary = ResultTable(name="汇总", columns=["姓名", "性别", "年龄"],
+                                  rows=[["张三", "女", 35]])
+            plan = preview_write_back([p], tpl, summary, [0])
+            self.assertEqual(len(plan["alignment_warnings"]), 1)
+            self.assertIn("未能可靠对齐", plan["alignment_warnings"][0][1])
+
+    def test_no_positions_reports_no_alignment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = str(Path(tmp) / "张三.xlsx")
+            make_form_xlsx(p, "张三", "男", 34)
+            summary = ResultTable(name="汇总", columns=["姓名", "性别", "年龄"],
+                                  rows=[["张三", "女", 35]])
+            plan = preview_write_back([p], make_output_table(), summary, [0])
+            self.assertEqual(plan["aligned"], [])
+            self.assertEqual(plan["alignment_warnings"], [])
+
+
 class TestWriteBackRejectsNonExcel(unittest.TestCase):
     def test_csv_is_reported_as_error(self):
         with tempfile.TemporaryDirectory() as tmp:

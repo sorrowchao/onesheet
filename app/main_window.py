@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
 
 from app.core.aggregator import aggregate
 from app.core.ai_scan import DEFAULT_API_URL, DEFAULT_MODEL
+from app.core.align import align_sheet
 from app.core.detector import detect_form_pairs_pos
 from app.core.document_reader import partition_excel_files, read_document
 from app.core.exporter import export_csv, export_xlsx
@@ -127,11 +128,17 @@ class ApiKeyDialog(QDialog):
 class TryExtractDialog(QDialog):
     """单文件试抽结果（只查看，不影响批量抽取结果）。"""
 
-    def __init__(self, path: str, tables: dict[str, ResultTable], parent=None):
+    def __init__(self, path: str, tables: dict[str, ResultTable], parent=None,
+                 notes: list[str] | None = None):
         super().__init__(parent)
         self.setWindowTitle(f"试抽：{Path(path).name}")
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(f"文件：{path}"))
+        if notes:
+            hint = QLabel("；".join(notes))
+            hint.setObjectName("dialogHint")
+            hint.setWordWrap(True)
+            layout.addWidget(hint)
         self.result_panel = ResultPanel()
         self.result_panel.show_results(tables)
         layout.addWidget(self.result_panel, 1)
@@ -397,7 +404,9 @@ class MainWindow(QMainWindow):
         main_splitter.addWidget(self.file_panel)
         main_splitter.addWidget(self.preview_panel)
         main_splitter.addWidget(self.config_panel)
-        main_splitter.setSizes([250, 470, 560])
+        # 默认文件管理器占 1/5；剩余宽度预览略多于配置（约 44% : 36%）。
+        # 用大权重表达比例，避免被各面板 minimumSizeHint 抬高而失真。
+        main_splitter.setSizes([1000, 2200, 1800])
         self.main_splitter = main_splitter
 
         self.result_panel = ResultPanel()
@@ -717,8 +726,13 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "读取失败", msg)
 
     def _on_field_selected(self, field):
-        """配置区字段表选中某行：预览区高亮对应标签/值。"""
-        self.preview_panel.highlight_field(field)
+        """配置区字段表选中某行：预览区高亮对应标签/值（按当前文件偏移修正）。"""
+        offset = (0, 0)
+        sheet = self.preview_panel.current_sheet()
+        if sheet is not None:
+            al = align_sheet(sheet, self.config_panel.active_fields())
+            offset = al.offset
+        self.preview_panel.highlight_field(field, offset)
 
     # ------------------------------------------------------------------
     # 扫描表单 / 手动配对
@@ -913,8 +927,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "提示",
                                 "以下结果表还没有选择任何字段：\n" + "、".join(empty))
             return
+        notes: list[str] = []
         try:
-            per_file = extract_file(self._sheets, tpl, self._current_file)
+            per_file = extract_file(self._sheets, tpl, self._current_file,
+                                    notes=notes)
             merged = aggregate([per_file])
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(self, "试抽失败", str(e))
@@ -923,7 +939,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"试抽完成：{Path(self._current_file).name} — "
             f"{len(merged)} 张表，共 {total} 行")
-        TryExtractDialog(self._current_file, merged, self).exec()
+        TryExtractDialog(self._current_file, merged, self, notes=notes).exec()
 
     def _run_extract(self):
         if self._task_running():
@@ -955,6 +971,7 @@ class MainWindow(QMainWindow):
         self._worker.progress.connect(self._on_progress)
         self._worker.file_ok.connect(lambda p: self._log(f"成功：{p}"))
         self._worker.file_error.connect(lambda p, e: self._log(f"失败：{p} — {e}"))
+        self._worker.file_note.connect(lambda p, n: self._log(f"对齐：{p} — {n}"))
         self._worker.done.connect(self._on_extract_done)
         self._worker.cancelled.connect(self._on_extract_cancelled)
         self._worker.start()
@@ -1100,11 +1117,18 @@ class MainWindow(QMainWindow):
                 f"没有匹配到可写入的文件（未匹配 {n_unmatched} 个，"
                 f"错误 {n_errors} 个）。{detail}")
             return False
+        n_aligned = len(plan.get("aligned", []))
+        n_align_warn = len(plan.get("alignment_warnings", []))
+        align_line = ""
+        if n_aligned or n_align_warn:
+            align_line = (f"其中 {n_aligned} 个文件按标签自动对齐，"
+                          f"{n_align_warn} 个疑似版式变化未对齐。\n")
         answer = QMessageBox.question(
             self, "反向写入预演",
             f"将读取 {len(files)} 个文件；\n"
             f"匹配到 {n_files} 个文件，将写入 {n_cells} 个单元格。\n"
-            f"未匹配 {n_unmatched} 个，错误 {n_errors} 个。\n\n继续写入吗？",
+            f"未匹配 {n_unmatched} 个，错误 {n_errors} 个。\n"
+            f"{align_line}\n继续写入吗？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes)
         return answer == QMessageBox.StandardButton.Yes
@@ -1125,6 +1149,12 @@ class MainWindow(QMainWindow):
             self._log(f"未匹配：{p}")
         for p, msg in errors:
             self._log(f"错误：{p} — {msg}")
+        aligned = report.get("aligned", [])
+        warnings = report.get("alignment_warnings", [])
+        for p, dr, dc in aligned:
+            self._log(f"对齐：{p} — 行 {dr:+d}，列 {dc:+d}")
+        for p, msg in warnings:
+            self._log(f"对齐提示：{p} — {msg}")
         if cancelled:
             self._log("已取消：仅处理了部分文件")
         self.progress.setValue(self.progress.maximum())
@@ -1132,6 +1162,8 @@ class MainWindow(QMainWindow):
         summary = (f"{prefix}：写入 {len(written)} 个文件，未匹配 {len(unmatched)} 个，"
                    f"错误 {len(errors)} 个，未使用汇总行 "
                    f"{len(report.get('unused_rows', []))} 行")
+        if aligned:
+            summary += f"，对齐 {len(aligned)} 个"
         self._log(summary)
         self.statusBar().showMessage(summary)
 

@@ -11,6 +11,7 @@ from copy import copy
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from .align import align_sheet
 from .models import FieldMapping, OutputTable, ResultTable
 from .reader import EXCEL_FORMATS, detect_format, read_excel
 
@@ -110,9 +111,12 @@ def _plan_files(files: list[str], output_table: OutputTable,
         errors: [(路径, 错误信息)...]
         unused_rows: [未被任何文件使用的汇总数据行号（1-based）...]
         cancelled: 是否因取消而提前结束
+        aligned: [(路径, 行偏移, 列偏移)...]，仅列出实际发生对齐的文件
+        alignment_warnings: [(路径, 说明)...]，锚点缺失/冲突时的提示
     """
     plan: dict = {"matched": [], "unmatched": [], "errors": [],
-                  "unused_rows": [], "cancelled": False}
+                  "unused_rows": [], "cancelled": False,
+                  "aligned": [], "alignment_warnings": []}
 
     # 每个匹配列 → 模板里对应的定位字段；没有定位位置的列记为「缺失」。
     key_specs: list[tuple[int, FieldMapping]] = []
@@ -153,8 +157,19 @@ def _plan_files(files: list[str], output_table: OutputTable,
                     (path, f"未找到 sheet：{output_table.sheet.sheet_keyword or '(第一个)'}"))
                 continue
 
+            # 源文件可能删除了顶部行/列：按标签锚点修正整表偏移。
+            alignment = align_sheet(sheet, output_table.fields)
+            dr, dc = alignment.offset
+            if alignment.shifted and alignment.reliable:
+                plan["aligned"].append((path, dr, dc))
+            elif alignment.anchor_count and not alignment.reliable:
+                plan["alignment_warnings"].append(
+                    (path, f"疑似版式变化，未能可靠对齐"
+                           f"（{alignment.votes}/{alignment.anchor_count} 个标签命中）"))
+
             # 读取分表里每个匹配字段的值
-            key_values = [_cell(sheet.grid, f.value_row - 1, f.value_col - 1)
+            key_values = [_cell(sheet.grid, f.value_row - 1 + dr,
+                                f.value_col - 1 + dc)
                           for _kc, f in key_specs]
             if all(_norm_key(v) == "" for v in key_values):
                 plan["unmatched"].append(path)
@@ -181,7 +196,12 @@ def _plan_files(files: list[str], output_table: OutputTable,
                 val = matched[col_i] if col_i < len(matched) else None
                 if val is None:
                     continue
-                writes[(f.value_row, f.value_col)] = val
+                r, c = f.value_row + dr, f.value_col + dc
+                if r < 1 or c < 1:
+                    continue
+                if alignment.shifted and (r > sheet.max_row or c > sheet.max_col):
+                    continue  # 防止误判的偏移写出表格范围
+                writes[(r, c)] = val
 
             plan["matched"].append((path, sheet, sheet_idx, writes))
         except Exception as e:  # noqa: BLE001 — 单文件失败不中断整体
@@ -201,7 +221,8 @@ def preview_write_back(files: list[str], output_table: OutputTable,
                        cancel_cb: Optional[Callable[[], bool]] = None) -> dict:
     """预演反向写入：只读取匹配，不写任何文件。
 
-    返回 {file_count, cell_count, unmatched, errors, unused_rows, cancelled}。
+    返回 {file_count, cell_count, unmatched, errors, unused_rows, cancelled,
+    aligned, alignment_warnings}。
     """
     plan = _plan_files(files, output_table, summary, key_cols,
                        progress_cb=progress_cb, cancel_cb=cancel_cb)
@@ -212,6 +233,8 @@ def preview_write_back(files: list[str], output_table: OutputTable,
         "errors": plan["errors"],
         "unused_rows": plan["unused_rows"],
         "cancelled": plan["cancelled"],
+        "aligned": plan["aligned"],
+        "alignment_warnings": plan["alignment_warnings"],
     }
 
 
@@ -230,6 +253,8 @@ def write_back(files: list[str], output_table: OutputTable,
         errors: [(路径, 错误信息)...]
         unused_rows: [未被任何文件使用的汇总数据行号（1-based）...]
         cancelled: 是否因取消而提前结束
+        aligned: [(路径, 行偏移, 列偏移)...]
+        alignment_warnings: [(路径, 说明)...]
     """
     plan = _plan_files(files, output_table, summary, key_cols,
                        progress_cb=progress_cb, cancel_cb=cancel_cb)
@@ -237,7 +262,9 @@ def write_back(files: list[str], output_table: OutputTable,
                     "unmatched": plan["unmatched"],
                     "errors": list(plan["errors"]),
                     "unused_rows": plan["unused_rows"],
-                    "cancelled": plan["cancelled"]}
+                    "cancelled": plan["cancelled"],
+                    "aligned": plan["aligned"],
+                    "alignment_warnings": plan["alignment_warnings"]}
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -16,6 +16,7 @@ class ExtractWorker(QThread):
     progress = Signal(int, int)      # 已完成数, 总数
     file_ok = Signal(str)            # 成功处理的一个文件路径
     file_error = Signal(str, str)    # 失败文件路径, 错误信息
+    file_note = Signal(str, str)     # 文件路径, 坐标对齐说明
     done = Signal(dict)              # {表名: ResultTable} 合并后的最终结果
     cancelled = Signal(int, int)     # 已处理数, 总数（用户取消，不更新结果）
 
@@ -40,7 +41,11 @@ class ExtractWorker(QThread):
                 return
             try:
                 sheets = read_document(path, vision=self.vision)
-                per_file.append(extract_file(sheets, self.template, path))
+                notes: list[str] = []
+                per_file.append(extract_file(sheets, self.template, path,
+                                             notes=notes))
+                for note in notes:
+                    self.file_note.emit(path, note)
                 self.file_ok.emit(path)
             except Exception as e:  # noqa: BLE001 — 单文件失败不中断整体
                 self.file_error.emit(path, str(e))

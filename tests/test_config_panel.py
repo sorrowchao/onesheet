@@ -3,7 +3,8 @@ import sys
 import unittest
 from unittest import mock
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import (QApplication, QMessageBox,
                                QTableWidgetSelectionRange)
 
@@ -67,6 +68,52 @@ class MoveFieldTest(unittest.TestCase):
         self.assertEqual(self._order(), ["B", "A", "C", "D"])
         self.assertNotIn(0, self.panel._checked)  # B 仍未勾选
         self.assertIn(1, self.panel._checked)     # A 仍勾选
+
+
+class FieldsTableWheelTest(unittest.TestCase):
+    """滚轮在映射表上：表格可滚时只滚表格，到边界后交给外层面板。"""
+
+    def setUp(self):
+        self.panel = ConfigPanel()
+        self.panel.set_form_fields(_fields(*[f"F{i}" for i in range(40)]))
+        self.bar = self.panel.fields_table.verticalScrollBar()
+        self.bar.setRange(0, 100)
+
+    def tearDown(self):
+        self.panel.deleteLater()
+
+    def _wheel(self, dy):
+        ev = QWheelEvent(
+            QPointF(5, 5), QPointF(5, 5), QPoint(0, 0), QPoint(0, dy),
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.NoScrollPhase, False)
+        self.panel.fields_table.wheelEvent(ev)
+        return ev
+
+    def test_middle_consumed_by_fields_table(self):
+        self.bar.setValue(50)
+        ev = self._wheel(-120)
+        self.assertTrue(ev.isAccepted())
+
+    def test_bottom_passes_to_outer(self):
+        self.bar.setValue(100)
+        ev = self._wheel(-120)
+        self.assertFalse(ev.isAccepted())
+
+    def test_top_passes_to_outer(self):
+        self.bar.setValue(0)
+        ev = self._wheel(120)
+        self.assertFalse(ev.isAccepted())
+
+    def test_table_without_scroll_passes_to_outer(self):
+        # 字段少、表格无需滚动时不能成为死区
+        self.bar.setRange(0, 0)
+        self.assertFalse(self._wheel(-120).isAccepted())
+        self.assertFalse(self._wheel(120).isAccepted())
+
+    def test_table_height_is_bounded(self):
+        # 字段很多时表格自己出滚动条，不把外层配置面板撑高
+        self.assertLessEqual(self.panel.fields_table.maximumHeight(), 400)
 
 
 class DragMoveToTest(unittest.TestCase):

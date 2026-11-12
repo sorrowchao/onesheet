@@ -206,13 +206,17 @@ class SettingsTest(unittest.TestCase):
         for n in names:
             (d / f"{n}.png").write_bytes(b"")
 
-    def test_icon_defaults_to_1(self):
-        self._make_icons("1", "2", "3")
-        self.assertEqual(settings.get_icon(self.dir), "1")
+    def test_icon_defaults_to_4(self):
+        self._make_icons("1", "2", "3", "4")
+        self.assertEqual(settings.get_icon(self.dir), "4")
         self.assertEqual(settings.icon_path(None, self.dir),
-                         settings.icons_dir(self.dir) / "1.png")
+                         settings.icons_dir(self.dir) / "4.png")
 
     def test_icon_falls_back_to_first_when_default_missing(self):
+        self._make_icons("1", "2", "3")
+        self.assertEqual(settings.get_icon(self.dir), "1")
+
+    def test_icon_falls_back_to_first_when_default_missing_nonnumeric(self):
         self._make_icons("3", "2")
         self.assertEqual(settings.get_icon(self.dir), "2")
 

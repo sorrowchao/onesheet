@@ -99,19 +99,21 @@ class PreviewPanel(QWidget):
                     return r, c
         return None
 
-    def highlight_field(self, field) -> None:
+    def highlight_field(self, field, offset: tuple[int, int] = (0, 0)) -> None:
         """滚动并选中字段对应的标签/值单元格。
 
         没有固定位置的字段（仅按标签文本匹配）会在当前 sheet 里查找标签文字。
+        `offset` 为当前文件相对模板的整表 (行偏移, 列偏移)。
         """
         sheet = self.current_sheet()
         if sheet is None or field is None:
             return
+        dr, dc = offset
         targets: list[tuple[int, int]] = []
         for r, c in ((field.label_row, field.label_col),
                      (field.value_row, field.value_col)):
             if r is not None and c is not None:
-                targets.append((r - 1, c - 1))
+                targets.append((r - 1 + dr, c - 1 + dc))
         if not targets:
             text = str(field.key or field.target or "").strip()
             pos = self._find_text(sheet, text) if text else None
