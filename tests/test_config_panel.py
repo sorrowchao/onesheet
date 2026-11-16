@@ -8,7 +8,10 @@ from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import (QApplication, QMessageBox,
                                QTableWidgetSelectionRange)
 
-from app.core.models import FieldMapping
+from app.core.models import (AggregateSpec, CleanupSpec, DerivedColumn,
+                             ExtractTemplate, FieldMapping, GroupBySpec,
+                             OutputTable, RowFilter, SheetConfig, StatsSpec,
+                             ValidationRule)
 from app.ui.config_panel import ConfigPanel
 
 # 必须在构造任何 QWidget 之前创建 QApplication。
@@ -17,6 +20,13 @@ _app = QApplication.instance() or QApplication(sys.argv)
 
 def _fields(*names):
     return [FieldMapping(target=n, source="kv", key=n) for n in names]
+
+
+def _template_with_validations():
+    return ExtractTemplate(name="t", output_tables=[OutputTable(
+        name="汇总", sheet=SheetConfig(), fields=_fields("A", "B"),
+        validations=[ValidationRule(type="required", columns=["A"])],
+    )])
 
 
 class MoveFieldTest(unittest.TestCase):
@@ -252,6 +262,88 @@ class TemplateButtonTest(unittest.TestCase):
         self.assertEqual(save_fired, [True])
 
 
+class AnalysisPersistenceTest(unittest.TestCase):
+    """分析准备配置随结果表克隆 / 保存。"""
+
+    def _analysis_table(self):
+        return OutputTable(
+            name="汇总", sheet=SheetConfig(), fields=_fields("A", "B"),
+            derived_columns=[DerivedColumn(target="合计", formula="[A] + [B]")],
+            cleanup=CleanupSpec(trim=True, dedupe=True,
+                                dedupe_columns=["A"],
+                                filters=[RowFilter(column="A", op="eq",
+                                                   value="1")]),
+            group_by=GroupBySpec(enabled=True, group_columns=["A"],
+                                 aggregations=[AggregateSpec(column="合计")]),
+            stats=StatsSpec(enabled=True, columns=["合计"], metrics=["avg"]),
+        )
+
+    def test_clone_keeps_analysis(self):
+        panel = ConfigPanel()
+        try:
+            panel.set_template(ExtractTemplate(
+                name="t", output_tables=[self._analysis_table()]))
+            ot = panel.get_template().output_tables[0]
+            self.assertEqual(ot.derived_columns[0].formula, "[A] + [B]")
+            self.assertTrue(ot.cleanup.trim)
+            self.assertEqual(ot.cleanup.dedupe_columns, ["A"])
+            self.assertEqual(ot.cleanup.filters[0].op, "eq")
+            self.assertTrue(ot.group_by.enabled)
+            self.assertEqual(ot.group_by.aggregations[0].column, "合计")
+            self.assertTrue(ot.stats.enabled)
+            self.assertEqual(ot.stats.metrics, ["avg"])
+        finally:
+            panel.deleteLater()
+
+    def test_set_current_analysis_round_trip(self):
+        panel = ConfigPanel()
+        try:
+            panel.set_template(ExtractTemplate(name="t", output_tables=[
+                OutputTable(name="汇总", sheet=SheetConfig(),
+                            fields=_fields("A", "B"))]))
+            panel.set_current_analysis(
+                [DerivedColumn(target="合计", formula="[A] + [B]")],
+                CleanupSpec(trim=True),
+                GroupBySpec(enabled=True, group_columns=["A"],
+                            aggregations=[AggregateSpec(column="合计")]),
+                StatsSpec(enabled=True, metrics=["sum"]))
+            ot = panel.get_template().output_tables[0]
+            self.assertEqual(ot.derived_columns[0].target, "合计")
+            self.assertTrue(ot.cleanup.trim)
+            self.assertTrue(ot.group_by.enabled)
+            self.assertEqual(ot.stats.metrics, ["sum"])
+        finally:
+            panel.deleteLater()
+
+    def test_set_current_analysis_copies(self):
+        panel = ConfigPanel()
+        try:
+            panel.set_template(ExtractTemplate(name="t", output_tables=[
+                OutputTable(name="汇总", sheet=SheetConfig(),
+                            fields=_fields("A"))]))
+            derived = [DerivedColumn(target="x", formula="[A]")]
+            cleanup = CleanupSpec(dedupe_columns=["A"])
+            panel.set_current_analysis(
+                derived, cleanup, GroupBySpec(), StatsSpec())
+            derived[0].target = "changed"
+            cleanup.dedupe_columns.append("B")
+            ot = panel.get_template().output_tables[0]
+            self.assertEqual(ot.derived_columns[0].target, "x")
+            self.assertEqual(ot.cleanup.dedupe_columns, ["A"])
+        finally:
+            panel.deleteLater()
+
+    def test_analysis_button_emits_signal(self):
+        panel = ConfigPanel()
+        fired = []
+        panel.analysis_requested.connect(lambda: fired.append(True))
+        try:
+            panel.btn_analysis.click()
+            self.assertEqual(fired, [True])
+        finally:
+            panel.deleteLater()
+
+
 class KeyComboTest(unittest.TestCase):
     """「主键字段」下拉框：单选，且进入 get_template 的字段。"""
 
@@ -371,6 +463,40 @@ class FilenameFieldTest(unittest.TestCase):
         self.panel._add_filename_field()
         fields = self.panel.get_template().output_tables[0].fields
         self.assertEqual([f.source for f in fields], ["kv", "filename"])
+
+
+class ValidationRulesPersistenceTest(unittest.TestCase):
+    def setUp(self):
+        self.panel = ConfigPanel()
+        self.panel.set_template(_template_with_validations())
+
+    def tearDown(self):
+        self.panel.deleteLater()
+
+    def test_clone_keeps_validations(self):
+        got = self.panel.get_template()
+        rules = got.output_tables[0].validations
+        self.assertEqual(len(rules), 1)
+        self.assertEqual(rules[0].columns, ["A"])
+
+    def test_set_current_validations(self):
+        self.panel.set_current_validations([
+            ValidationRule(type="unique", columns=["A", "B"])])
+        rules = self.panel.get_template().output_tables[0].validations
+        self.assertEqual(rules[0].type, "unique")
+        self.assertEqual(rules[0].columns, ["A", "B"])
+
+    def test_set_current_validations_copies(self):
+        rules = [ValidationRule(type="required", columns=["A"])]
+        self.panel.set_current_validations(rules)
+        rules[0].columns.append("B")   # 外部改动不应影响面板内部
+        got = self.panel.get_template().output_tables[0].validations
+        self.assertEqual(got[0].columns, ["A"])
+
+    def test_current_output_table(self):
+        ot = self.panel.current_output_table()
+        self.assertEqual(ot.name, "汇总")
+        self.assertEqual([f.target for f in ot.fields], ["A", "B"])
 
 
 if __name__ == "__main__":

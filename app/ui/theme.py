@@ -55,6 +55,8 @@ _DARK = {
     "check_bg": "#1e1e1e",    # 未勾选框底色
     "check_border": "#6b6b6b",  # 未勾选框边框（与底色区分，能看见）
     "danger": "#f14c4c",      # 错误提示文字
+    "error_bg": "#3a2f16",    # 校验失败单元格底色（琥珀黄提醒色）
+    "error_text": "#e2c08d",  # 校验失败单元格文字
 }
 
 _LIGHT = {
@@ -83,6 +85,8 @@ _LIGHT = {
     "check_bg": "#ffffff",
     "check_border": "#8a8a8a",
     "danger": "#cd3131",
+    "error_bg": "#fff4ce",
+    "error_text": "#7a5c00",
 }
 
 _PALETTES = {DARK: _DARK, LIGHT: _LIGHT}
@@ -131,21 +135,43 @@ QSplitter::handle:horizontal { width: 4px; }
 QSplitter::handle:vertical { height: 4px; }
 QSplitter::handle:hover { background-color: $accent; }
 
-/* --- 分组框：圆角卡片 --- */
+/* --- 分组框：圆角卡片，标题置于卡片内部 --- */
+/* 注意：Qt 忽略 QGroupBox::title 上的 font/font-weight（实测无效），标题用的是
+   QGroupBox 控件自身的字体——所以加粗必须写在 QGroupBox 上。子控件由 QWidget
+   规则重新解析字体，不会继承这里的加粗。 */
 QGroupBox {
     background-color: $card_bg;
     border: 1px solid $border;
     border-radius: 10px;
-    margin-top: 14px;
-    padding: 10px 10px 8px 10px;
-    font-weight: bold;
+    margin-top: 10px;
+    padding: 42px 12px 12px 12px;
+    font-weight: 700;
 }
 QGroupBox::title {
-    subcontrol-origin: margin;
+    subcontrol-origin: padding;
     subcontrol-position: top left;
-    left: 10px;
-    padding: 0 6px;
+    left: 12px;
+    padding: 9px 0 9px 10px;
+    background-color: transparent;
+    border-left: 4px solid $accent;
     color: $text;
+    font-size: 15px;
+    letter-spacing: 0.5px;
+}
+/* 嵌套分组框：透明底，标题稍小，保持层级 */
+QGroupBox QGroupBox {
+    background-color: transparent;
+    margin-top: 14px;
+    padding: 28px 4px 4px 4px;
+}
+QGroupBox QGroupBox::title {
+    left: 10px;
+    padding: 3px 0 3px 8px;
+    background-color: transparent;
+    border-left: 3px solid $accent;
+    color: $text;
+    font-size: 13px;
+    letter-spacing: 0.5px;
 }
 
 /* --- 面板分区标题：色带 + 分隔线 --- */
@@ -384,3 +410,8 @@ def stylesheet(name: str | None = DARK) -> str:
         check_icon=check_icon_path().as_posix(),
         **_PALETTES[normalize(name)],
     )
+
+
+def palette(name: str | None = DARK) -> dict:
+    """返回指定主题的配色字典副本（供需要 QColor 的控件使用）。"""
+    return dict(_PALETTES[normalize(name)])

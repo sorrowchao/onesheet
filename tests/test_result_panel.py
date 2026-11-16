@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QApplication, QTableWidget,
                                QTableWidgetSelectionRange)
 
-from app.core.models import ResultTable
+from app.core.models import ResultTable, ValidationIssue
 from app.ui.result_panel import ResultPanel
 
 # 必须在构造任何 QWidget 之前创建 QApplication。
@@ -158,6 +158,65 @@ class ResultPanelTest(unittest.TestCase):
         self.w.insert_row_above()
         self.w.undo()
         self.assertEqual(self.w.rowCount(), 2)
+
+    # ------------------------------------------------------------------
+    # 校验标记
+    # ------------------------------------------------------------------
+    def _mark_name(self, row=0, message="必填项为空"):
+        self.panel.apply_validation([ValidationIssue(
+            table="汇总", row=row, column="姓名",
+            rule_type="required", message=message)])
+
+    def test_apply_validation_marks_cell(self):
+        self._mark_name()
+        item = self.w.item(0, 1)
+        self.assertEqual(item.toolTip(), "必填项为空")
+        self.assertEqual(item.background().style(), Qt.BrushStyle.SolidPattern)
+
+    def test_editing_clears_mark(self):
+        self._mark_name()
+        self.w.item(0, 1).setText("王五")
+        item = self.w.item(0, 1)
+        self.assertEqual(item.toolTip(), "")
+        self.assertEqual(item.background().style(), Qt.BrushStyle.NoBrush)
+
+    def test_apply_empty_clears_marks(self):
+        self._mark_name()
+        self.panel.apply_validation([])
+        self.assertEqual(self.w.item(0, 1).toolTip(), "")
+        self.assertEqual(self.w.item(0, 1).background().style(),
+                         Qt.BrushStyle.NoBrush)
+
+    def test_mark_ignores_unknown_column(self):
+        self.panel.apply_validation([ValidationIssue(
+            table="汇总", row=0, column="不存在", rule_type="required",
+            message="x")])
+        self.assertEqual(self.w.item(0, 1).toolTip(), "")
+
+    def test_mark_ignores_other_table(self):
+        self.panel.apply_validation([ValidationIssue(
+            table="别的表", row=0, column="姓名", rule_type="required",
+            message="x")])
+        self.assertEqual(self.w.item(0, 1).toolTip(), "")
+
+    def test_insert_row_clears_marks(self):
+        self._mark_name()
+        self.w.setCurrentCell(1, 0)
+        self.w.insert_row_above()
+        self.assertEqual(self.w._marks, {})
+
+    def test_paste_over_marked_cell_clears_mark(self):
+        self._mark_name()
+        QApplication.clipboard().setText("王五")
+        self.w.setCurrentCell(0, 1)
+        self.w.paste()
+        self.assertEqual(self.w.item(0, 1).toolTip(), "")
+
+    def test_set_error_style_recolors_marks(self):
+        self._mark_name()
+        self.panel.set_error_style("#123456", "#ffffff")
+        self.assertEqual(self.w.item(0, 1).background().color().name(),
+                         "#123456")
 
 
 if __name__ == "__main__":

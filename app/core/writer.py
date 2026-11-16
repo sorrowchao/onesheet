@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from .align import align_sheet
-from .models import FieldMapping, OutputTable, ResultTable
+from .models import FieldMapping, OutputTable, ResultTable, norm_key
 from .reader import EXCEL_FORMATS, detect_format, read_excel
 
 
@@ -56,39 +56,8 @@ def _cell(grid: list[list], r: int, c: int):
     return None
 
 
-def _norm_key(v) -> str:
-    """键值归一化，用于跨格式/类型比对，避免「同一值因存储/类型不同而匹配不上」。
-
-    - None → ""
-    - 数值：整型浮点去掉小数位（34.0 → 34）；NaN 等特殊值原样
-    - 字符串：去首尾空白；带千分位逗号或小数的数值字符串归一为数值形式
-      （"1,234" → "1234"、"34.0" → "34"）；纯数字文本（如 "007"）保留原样以保住前导零
-    """
-    if v is None:
-        return ""
-    if isinstance(v, float):
-        if v != v:  # NaN
-            return "nan"
-        if v.is_integer():
-            return str(int(v))
-        return str(v)
-    if isinstance(v, int):
-        return str(v)
-    s = str(v).strip()
-    if s == "":
-        return ""
-    # 只有含千分位逗号或小数点时才尝试按数值归一，
-    # 避免把 "007" 之类的文本 ID 误压成 7。
-    if "," in s or "，" in s or "." in s:
-        t = s.replace(",", "").replace("，", "")
-        try:
-            f = float(t)
-            if f.is_integer():
-                return str(int(f))
-            return str(f)
-        except ValueError:
-            return s
-    return s
+# 键值归一化逻辑已提升到 models.norm_key（校验器共用），此处保留旧名字兼容。
+_norm_key = norm_key
 
 
 def _find_key_field(output_table: OutputTable, key_target: str):

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
 from app.core.aggregator import aggregate
 from app.core.ai_scan import DEFAULT_API_URL, DEFAULT_MODEL
 from app.core.align import align_sheet
+from app.core.analysis import apply_analysis, table_has_config
 from app.core.detector import detect_form_pairs_pos
 from app.core.document_reader import partition_excel_files, read_document
 from app.core.exporter import export_csv, export_xlsx
@@ -23,6 +24,7 @@ from app.core.models import (SEQ_COLUMN, FieldMapping, OutputTable,
                              ResultTable, SheetData, duplicate_value_positions)
 from app.core.pdf_reader import VisionConfig
 from app.core.reader import detect_format
+from app.core.validator import validate_results, validate_table
 from app.core.writer import _norm_key, preview_write_back, read_summary_xlsx
 from app.service import settings
 from app.service.worker import (AiScanWorker, ExtractWorker, PdfReadWorker,
@@ -30,12 +32,15 @@ from app.service.worker import (AiScanWorker, ExtractWorker, PdfReadWorker,
 from app.template import store as template_store
 from app.ui import theme
 from app.ui.about_dialog import AboutDialog
+from app.ui.analysis_prep_dialog import AnalysisPrepDialog
 from app.ui.config_panel import ConfigPanel
 from app.ui.file_panel import FilePanel, collect_input_files
 from app.ui.import_folder_dialog import ImportFolderDialog
 from app.ui.preview_panel import PreviewPanel
 from app.ui.result_panel import ResultPanel
 from app.ui.template_manager import TemplateManagerDialog
+from app.ui.title_bar_win import apply_dark_title_bar
+from app.ui.validation_rules_dialog import ValidationRulesDialog
 
 
 class ApiKeyDialog(QDialog):
@@ -397,6 +402,9 @@ class MainWindow(QMainWindow):
         self.config_panel.save_template_requested.connect(self._save_template)
         self.config_panel.manage_templates_requested.connect(
             self._open_template_manager)
+        self.config_panel.validation_rules_requested.connect(
+            self._edit_validation_rules)
+        self.config_panel.analysis_requested.connect(self._edit_analysis)
         self.config_panel.field_selected.connect(self._on_field_selected)
         self.preview_panel.pair_picked.connect(self._on_pair_picked)
         self.preview_panel.pair_step.connect(self._on_pair_step)
@@ -404,9 +412,9 @@ class MainWindow(QMainWindow):
         main_splitter.addWidget(self.file_panel)
         main_splitter.addWidget(self.preview_panel)
         main_splitter.addWidget(self.config_panel)
-        # 默认文件管理器占 1/5；剩余宽度预览略多于配置（约 44% : 36%）。
+        # 首次运行的三栏初始宽度：文件管理器 : 预览 : 配置 = 25% : 40% : 35%。
         # 用大权重表达比例，避免被各面板 minimumSizeHint 抬高而失真。
-        main_splitter.setSizes([1000, 2200, 1800])
+        main_splitter.setSizes([2500, 4000, 3500])
         self.main_splitter = main_splitter
 
         self.result_panel = ResultPanel()
@@ -425,6 +433,10 @@ class MainWindow(QMainWindow):
         btn_try.clicked.connect(self._run_try_extract)
         btn_extract = QPushButton("批量抽取")
         btn_extract.clicked.connect(self._run_extract)
+        btn_analysis = QPushButton("运行分析")
+        btn_analysis.setToolTip(
+            "按当前结果表的分析准备配置（派生列 / 清洗 / 分组汇总 / 统计）加工结果")
+        btn_analysis.clicked.connect(self._run_analysis)
         btn_write = QPushButton("反向写入")
         btn_write.clicked.connect(self._run_write_back)
         btn_export = QToolButton()
@@ -439,7 +451,7 @@ class MainWindow(QMainWindow):
         corner_layout = QHBoxLayout(corner)
         corner_layout.setContentsMargins(0, 0, 0, 0)
         corner_layout.setSpacing(6)
-        for btn in (btn_try, btn_extract, btn_write, btn_export):
+        for btn in (btn_try, btn_extract, btn_analysis, btn_write, btn_export):
             btn.setProperty("compact", True)   # theme.py: 更小的按钮内边距
             corner_layout.addWidget(btn)
 
@@ -502,6 +514,13 @@ class MainWindow(QMainWindow):
         data_menu.addAction("AI 接口设置（OpenAI 兼容）…", self._edit_api_key)
         data_menu.addAction("手动配对", self._on_pair_requested)
         data_menu.addSeparator()
+        data_menu.addAction("校验规则…", self._edit_validation_rules)
+        data_menu.addAction(
+            "运行校验", lambda _checked=False: self._run_validation(manual=True),
+            "Ctrl+Shift+L")
+        data_menu.addAction("分析准备…", self._edit_analysis)
+        data_menu.addAction("运行分析", self._run_analysis, "Ctrl+Shift+A")
+        data_menu.addSeparator()
         data_menu.addAction("试抽当前文件", self._run_try_extract)
         data_menu.addAction("批量抽取", self._run_extract, "F5")
         data_menu.addAction("反向写入", self._run_write_back, "Ctrl+Shift+W")
@@ -546,9 +565,14 @@ class MainWindow(QMainWindow):
     def _set_theme(self, name: str, persist: bool = True):
         """应用主题（深/浅），同步菜单勾选；persist 时写入设置文件。"""
         name = theme.normalize(name)
+        self._theme = name
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(theme.stylesheet(name))
+        # 系统原生标题栏：深色主题下也改为深色（Windows 10 20H1+/11）。
+        apply_dark_title_bar(self, name == theme.DARK)
+        pal = theme.palette(name)
+        self.result_panel.set_error_style(pal["error_bg"], pal["error_text"])
         act = self._theme_actions.get(name)
         if act is not None:
             act.setChecked(True)
@@ -911,6 +935,125 @@ class MainWindow(QMainWindow):
         return answer == QMessageBox.StandardButton.Yes
 
     # ------------------------------------------------------------------
+    # 数据校验
+    # ------------------------------------------------------------------
+    def _edit_validation_rules(self):
+        """编辑当前结果表的校验规则（随模板保存）。"""
+        ot = self.config_panel.current_output_table()
+        if ot is None:
+            QMessageBox.information(self, "提示", "请先在配置面板选择一张结果表")
+            return
+        if not ot.fields:
+            QMessageBox.information(self, "提示", "请先为当前结果表配置字段")
+            return
+        dlg = ValidationRulesDialog(ot, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            rules = dlg.rules()
+            self.config_panel.set_current_validations(rules)
+            self.statusBar().showMessage(f"已更新校验规则：{len(rules)} 条")
+
+    def _run_validation(self, manual: bool = False):
+        """按模板规则校验当前结果表，高亮问题格并写入日志。"""
+        tpl = self.config_panel.get_template()
+        if not any(ot.validations for ot in tpl.output_tables):
+            self.result_panel.apply_validation([])
+            if manual:
+                self._log("校验：未配置校验规则")
+                self.statusBar().showMessage("未配置校验规则")
+            return []
+        tables = self.result_panel.read_results()
+        if not tables:
+            if manual:
+                QMessageBox.information(self, "提示", "还没有抽取结果")
+            return []
+        issues = validate_results(tables, tpl)
+        self.result_panel.apply_validation(issues)
+        if not issues:
+            if manual:
+                self._log("校验通过：未发现问题")
+                self.statusBar().showMessage("校验通过")
+            return []
+        counts: dict[str, int] = {}
+        for it in issues:
+            counts[it.table] = counts.get(it.table, 0) + 1
+        detail = "，".join(f"{name}：{n}" for name, n in counts.items())
+        self._log(f"校验：共 {len(issues)} 个问题（{detail}）")
+        for it in issues:
+            row = "表级" if it.row < 0 else f"第 {it.row + 1} 行"
+            col = f"「{it.column}」" if it.column else ""
+            self._log(f"校验：{it.table} {row}{col} {it.message}")
+        self.statusBar().showMessage(f"校验：{len(issues)} 个问题（已高亮）")
+        return issues
+
+    def _confirm_validation_issues(self, issues) -> bool:
+        """反向写入前校验未通过：列出问题，用户可继续或取消。"""
+        lines = []
+        for it in issues[:10]:
+            row = "表级" if it.row < 0 else f"第 {it.row + 1} 行"
+            col = f"「{it.column}」" if it.column else ""
+            lines.append(f"· {row}{col} {it.message}")
+        more = ("" if len(issues) <= 10
+                else f"\n…另有 {len(issues) - 10} 条，详见汇总结果高亮")
+        answer = QMessageBox.warning(
+            self, "数据校验未通过",
+            f"当前汇总数据存在 {len(issues)} 个校验问题：\n\n"
+            + "\n".join(lines) + more
+            + "\n\n仍要继续反向写入吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        return answer == QMessageBox.StandardButton.Yes
+
+    # ------------------------------------------------------------------
+    # 分析准备（派生列 / 清洗 / 分组汇总 / 描述统计）
+    # ------------------------------------------------------------------
+    def _edit_analysis(self):
+        """编辑当前结果表的分析准备配置（随模板保存）。"""
+        ot = self.config_panel.current_output_table()
+        if ot is None:
+            QMessageBox.information(self, "提示", "请先在配置面板选择一张结果表")
+            return
+        if not ot.fields:
+            QMessageBox.information(self, "提示", "请先为当前结果表配置字段")
+            return
+        dlg = AnalysisPrepDialog(ot, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.config_panel.set_current_analysis(*dlg.specs())
+            self.statusBar().showMessage("已更新分析准备配置")
+
+    @staticmethod
+    def _base_result_tables(edited: dict[str, ResultTable],
+                            template) -> dict[str, ResultTable]:
+        """只保留模板中的基础结果表（剔除分组汇总 / 描述统计等生成表）。"""
+        base = {ot.name for ot in template.output_tables}
+        return {name: t for name, t in edited.items() if name in base}
+
+    def _run_analysis(self):
+        """手动运行分析准备，加工当前汇总结果并写回结果区。"""
+        tpl = self.config_panel.get_template()
+        if not any(table_has_config(ot) for ot in tpl.output_tables):
+            QMessageBox.information(
+                self, "提示",
+                "还没有分析准备配置。请先在配置区点「分析准备…」"
+                "（或菜单「数据 → 分析准备…」）配置。")
+            return
+        tables = self.result_panel.read_results()
+        if not tables:
+            QMessageBox.information(self, "提示", "还没有抽取结果")
+            return
+        try:
+            out, notes = apply_analysis(tables, tpl)
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, "分析失败", str(e))
+            return
+        self._results = out
+        self.result_panel.show_results(out)
+        for n in notes:
+            self._log(f"分析：{n}")
+        self.statusBar().showMessage(f"分析完成：{len(out)} 张表")
+        # 去重/过滤后行号已变，刷新校验高亮。
+        self._run_validation()
+
+    # ------------------------------------------------------------------
     # 抽取 / 导出
     # ------------------------------------------------------------------
     def _run_try_extract(self):
@@ -986,6 +1129,7 @@ class MainWindow(QMainWindow):
         self.result_panel.show_results(merged)
         total_rows = sum(len(rt.rows) for rt in merged.values())
         self.statusBar().showMessage(f"抽取完成：{len(merged)} 张表，共 {total_rows} 行")
+        self._run_validation()
 
     def _on_extract_cancelled(self, processed: int, total: int):
         self._finish_task()
@@ -1051,6 +1195,11 @@ class MainWindow(QMainWindow):
         if not edited:
             QMessageBox.information(self, "提示", "请先批量抽取，或在对话框里导入汇总 Excel")
             return
+        # 分组汇总 / 描述统计等生成表不参与反向写入。
+        edited = self._base_result_tables(edited, tpl)
+        if not edited:
+            QMessageBox.information(self, "提示", "没有可反向写入的基础结果表")
+            return
 
         dlg = WriteBackDialog(edited, tpl.output_tables, self._results, self)
         if dlg.exec() != QDialog.Accepted:
@@ -1071,6 +1220,11 @@ class MainWindow(QMainWindow):
         key_cols = dlg.key_cols()
         if not key_cols:
             QMessageBox.warning(self, "提示", "请至少勾选一个匹配字段")
+            return
+
+        # 回写前按目标结果表的规则再校验一次，有问题先拦截确认。
+        issues = validate_table(summary, ot.validations)
+        if issues and not self._confirm_validation_issues(issues):
             return
 
         if not self._confirm_write_back_plan(excel_files, ot, summary, key_cols):
@@ -1216,6 +1370,12 @@ class MainWindow(QMainWindow):
             self.v_splitter.setSizes(v_sizes)
         if state.get("maximized"):
             self.showMaximized()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # 原生窗口句柄在首次显示/最大化后才稳定，这里再应用一次标题栏配色。
+        current = getattr(self, "_theme", theme.DEFAULT)
+        apply_dark_title_bar(self, current == theme.DARK)
 
     def closeEvent(self, event):
         geo = self.normalGeometry() if self.isMaximized() else self.geometry()

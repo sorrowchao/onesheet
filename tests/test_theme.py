@@ -77,6 +77,25 @@ class ThemeTest(unittest.TestCase):
             block = qss.split("QTableWidget#fieldsTable::indicator", 1)[1]
             self.assertIn("margin-left: 13px", block.split("}", 1)[0])
 
+    def test_group_box_titles_inside_cards(self):
+        """分组框标题位于卡片内部，不再压在边框线上；嵌套框用强调条。"""
+        for name in theme.ALL:
+            qss = theme.stylesheet(name)
+            title_block = qss.split("\nQGroupBox::title {\n", 1)[1].split("}", 1)[0]
+            self.assertIn("subcontrol-origin: padding", title_block)
+            nested_block = qss.split("\nQGroupBox QGroupBox::title {\n", 1)[1]
+            self.assertIn("border-left: 3px solid",
+                          nested_block.split("}", 1)[0])
+
+    def test_group_box_title_is_bold(self):
+        """Qt 忽略 ::title 上的 font-weight（实测无效），加粗要写在 QGroupBox 上。"""
+        for name in theme.ALL:
+            qss = theme.stylesheet(name)
+            box_block = qss.split("\nQGroupBox {\n", 1)[1].split("}", 1)[0]
+            self.assertIn("font-weight: 700", box_block)
+            title_block = qss.split("\nQGroupBox::title {\n", 1)[1].split("}", 1)[0]
+            self.assertNotIn("font-weight", title_block)
+
 
 if __name__ == "__main__":
     unittest.main()

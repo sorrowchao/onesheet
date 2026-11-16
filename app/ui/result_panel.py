@@ -4,10 +4,11 @@
 插入/删除行、撤销/重做，以及右键菜单。
 """
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (QApplication, QMenu, QTableWidget,
                                QTableWidgetItem, QTabWidget)
 
-from app.core.models import SEQ_COLUMN, ResultTable
+from app.core.models import SEQ_COLUMN, ResultTable, ValidationIssue
 
 # 撤销栈上限（每次快照整表内容，避免无限增长）
 _MAX_UNDO = 100
@@ -22,16 +23,86 @@ class ResultTableWidget(QTableWidget):
         self._undo: list[tuple[int, list[list[str]]]] = []
         self._redo: list[tuple[int, list[list[str]]]] = []
         self._state = self._snapshot()    # 最近一次已提交状态
+        self._marks: dict[tuple[int, int], str] = {}  # 校验失败标记 (行, 列) -> 提示
+        self._error_bg = QColor("#3a2f16")   # 深色主题默认，主窗口按主题覆盖
+        self._error_fg = QColor("#e2c08d")
         self.verticalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
         self.itemChanged.connect(self._on_item_changed)
 
     def setItem(self, row: int, column: int, item: QTableWidgetItem):
-        """结果表所有单元格内容统一居中（含粘贴/撤销新建的单元格）。"""
+        """结果表所有单元格内容统一居中（含粘贴/撤销新建的单元格）。
+
+        若该格带校验标记，同步恢复底色与提示（撤销/重做会重建单元格）。
+        """
         if item is not None:
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         super().setItem(row, column, item)
+        if item is not None and (row, column) in self._marks:
+            prev = self._restoring
+            self._restoring = True   # 设置底色会触发 itemChanged，别当作编辑
+            try:
+                self._apply_mark(item, self._marks[(row, column)])
+            finally:
+                self._restoring = prev
+
+    # ------------------------------------------------------------------
+    # 校验标记
+    # ------------------------------------------------------------------
+    def set_error_style(self, bg: str, fg: str):
+        """设置校验失败单元格的底色/文字色（主题切换时由主窗口调用）。"""
+        self._error_bg = QColor(bg)
+        self._error_fg = QColor(fg)
+        prev = self._restoring
+        self._restoring = True
+        try:
+            for (r, c), msg in self._marks.items():
+                item = self.item(r, c)
+                if item is not None:
+                    self._apply_mark(item, msg)
+        finally:
+            self._restoring = prev
+
+    def apply_marks(self, marks: dict[tuple[int, int], str]):
+        """整体替换校验标记并刷新显示。"""
+        prev = self._restoring
+        self._restoring = True
+        try:
+            for (r, c) in list(self._marks):
+                item = self.item(r, c)
+                if item is not None:
+                    self._clear_mark(item)
+            self._marks = dict(marks)
+            for (r, c), msg in self._marks.items():
+                item = self.item(r, c)
+                if item is not None:
+                    self._apply_mark(item, msg)
+        finally:
+            self._restoring = prev
+
+    def clear_marks(self):
+        prev = self._restoring
+        self._restoring = True
+        try:
+            for (r, c) in list(self._marks):
+                item = self.item(r, c)
+                if item is not None:
+                    self._clear_mark(item)
+            self._marks = {}
+        finally:
+            self._restoring = prev
+
+    def _apply_mark(self, item: QTableWidgetItem, msg: str):
+        item.setBackground(QBrush(self._error_bg))
+        item.setForeground(QBrush(self._error_fg))
+        item.setToolTip(msg)
+
+    @staticmethod
+    def _clear_mark(item: QTableWidgetItem):
+        item.setData(Qt.ItemDataRole.BackgroundRole, None)
+        item.setData(Qt.ItemDataRole.ForegroundRole, None)
+        item.setToolTip("")
 
     # ------------------------------------------------------------------
     # 快照 / 撤销
@@ -71,9 +142,19 @@ class ResultTableWidget(QTableWidget):
     def _commit(self):
         self._state = self._snapshot()
 
-    def _on_item_changed(self, _item):
+    def _on_item_changed(self, item):
         if self._restoring:
             return
+        # 用户改动了校验失败单元格：旧标记已过期，先清掉。
+        pos = (item.row(), item.column())
+        if pos in self._marks:
+            self._marks.pop(pos, None)
+            prev = self._restoring
+            self._restoring = True
+            try:
+                self._clear_mark(item)
+            finally:
+                self._restoring = prev
         self._record()
         self._commit()
 
@@ -148,13 +229,17 @@ class ResultTableWidget(QTableWidget):
                 self.setColumnCount(need_cols)
             for i, row in enumerate(grid):
                 for j, value in enumerate(row):
-                    item = self.item(r0 + i, c0 + j)
+                    pos = (r0 + i, c0 + j)
+                    item = self.item(*pos)
                     if item is None:
                         if value:
-                            self.setItem(r0 + i, c0 + j,
-                                         QTableWidgetItem(value))
+                            self.setItem(*pos, QTableWidgetItem(value))
                     else:
                         item.setText(value)
+                    if pos in self._marks:
+                        self._marks.pop(pos, None)
+                        if item is not None:
+                            self._clear_mark(item)
         finally:
             self._restoring = False
         self._commit()
@@ -170,9 +255,14 @@ class ResultTableWidget(QTableWidget):
         self._restoring = True
         try:
             for idx in indexes:
-                item = self.item(idx.row(), idx.column())
+                pos = (idx.row(), idx.column())
+                item = self.item(*pos)
                 if item is not None:
                     item.setText("")
+                if pos in self._marks:
+                    self._marks.pop(pos, None)
+                    if item is not None:
+                        self._clear_mark(item)
         finally:
             self._restoring = False
         self._commit()
@@ -180,6 +270,7 @@ class ResultTableWidget(QTableWidget):
     def insert_row_above(self):
         row = max(self.currentRow(), 0)
         self._record()
+        self.clear_marks()   # 行号整体位移，旧标记作废
         self._restoring = True
         try:
             self.insertRow(row)
@@ -195,6 +286,7 @@ class ResultTableWidget(QTableWidget):
         if not rows:
             return
         self._record()
+        self.clear_marks()   # 行号整体位移，旧标记作废
         self._restoring = True
         try:
             for row in reversed(rows):
@@ -286,6 +378,37 @@ class ResultPanel(QTabWidget):
             w.resizeRowsToContents()  # 多行单元格（如同类行堆叠）需要撑高才看得全
             w.reset_history()
             self.addTab(w, name)
+
+    def set_error_style(self, bg: str, fg: str):
+        """把校验失败配色应用到所有结果表（主题切换时调用）。"""
+        for i in range(self.count()):
+            w = self.widget(i)
+            if isinstance(w, ResultTableWidget):
+                w.set_error_style(bg, fg)
+
+    def apply_validation(self, issues: list[ValidationIssue]):
+        """把校验问题映射到各标签页的单元格并高亮（无问题的表清空标记）。"""
+        grouped: dict[str, list[ValidationIssue]] = {}
+        for it in issues:
+            if it.row >= 0:
+                grouped.setdefault(it.table, []).append(it)
+        for i in range(self.count()):
+            name = self.tabText(i)
+            w = self.widget(i)
+            if not isinstance(w, ResultTableWidget):
+                continue
+            col_by_name: dict[str, int] = {}
+            for c in range(w.columnCount()):
+                header = w.horizontalHeaderItem(c)
+                if header is not None:
+                    col_by_name.setdefault(header.text(), c)
+            marks: dict[tuple[int, int], str] = {}
+            for it in grouped.get(name, []):
+                col = col_by_name.get(it.column)
+                if col is None or not (0 <= it.row < w.rowCount()):
+                    continue
+                marks[(it.row, col)] = it.message
+            w.apply_marks(marks)
 
     def read_results(self) -> dict[str, ResultTable]:
         """把当前所有标签页（含用户编辑）读回 ResultTable。

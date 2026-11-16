@@ -7,9 +7,13 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFormLayout,
                                QVBoxLayout, QWidget)
 
 from app.core.align import align_sheet
+from app.core.analysis import (clone_cleanup, clone_derived, clone_group_by,
+                               clone_stats)
 from app.core.extractor import object_name_from_path
-from app.core.models import (ExtractTemplate, FieldMapping,
-                             OutputTable, SheetConfig, SheetData, dedupe_targets)
+from app.core.models import (CleanupSpec, DerivedColumn, ExtractTemplate,
+                             FieldMapping, GroupBySpec, OutputTable,
+                             SheetConfig, SheetData, StatsSpec, ValidationRule,
+                             dedupe_targets)
 
 
 class _FieldsTable(QTableWidget):
@@ -71,6 +75,8 @@ class ConfigPanel(QWidget):
     open_template_requested = Signal()  # 请求打开模板
     save_template_requested = Signal()  # 请求保存模板
     manage_templates_requested = Signal()  # 请求打开模板管理器
+    validation_rules_requested = Signal()  # 请求编辑当前结果表的校验规则
+    analysis_requested = Signal()     # 请求编辑当前结果表的分析准备配置
     field_selected = Signal(object)   # 字段表当前行变化（FieldMapping）
 
     def __init__(self, parent=None):
@@ -122,7 +128,8 @@ class ConfigPanel(QWidget):
         root.addWidget(name_box)
 
         # --- 结果表列表 ---
-        tables_box = QGroupBox("结果表（一张结果表对应一个 sheet）")
+        tables_box = QGroupBox("结果表")
+        tables_box.setToolTip("一张结果表对应一个 sheet")
         tables_layout = QVBoxLayout(tables_box)
         self.table_list = QListWidget()
         self.table_list.currentRowChanged.connect(self._on_table_selected)
@@ -133,11 +140,20 @@ class ConfigPanel(QWidget):
         btn_add_t.clicked.connect(self._add_table)
         btn_del_t = QPushButton("删除结果表")
         btn_del_t.clicked.connect(self._del_table)
+        self.btn_rules = QPushButton("校验规则…")
+        self.btn_rules.setToolTip("为当前结果表配置数据校验：必填 / 数值范围 / 唯一 / 合计")
+        self.btn_rules.clicked.connect(self.validation_rules_requested.emit)
+        self.btn_analysis = QPushButton("分析准备…")
+        self.btn_analysis.setToolTip(
+            "为当前结果表配置加工：派生列 / 清洗去重 / 分组汇总 / 描述统计\n"
+            "（手动「运行分析」后生效，分组汇总与描述统计生成额外结果页签）")
+        self.btn_analysis.clicked.connect(self.analysis_requested.emit)
         tbtns.addWidget(btn_add_t)
         tbtns.addWidget(btn_del_t)
+        tbtns.addWidget(self.btn_rules)
+        tbtns.addWidget(self.btn_analysis)
         tbtns.addStretch(1)
         tables_layout.addLayout(tbtns)
-        root.addWidget(tables_box)
 
         # --- 当前结果表配置 ---
         cfg_box = QGroupBox("当前结果表配置")
@@ -154,7 +170,8 @@ class ConfigPanel(QWidget):
         cfg_layout.addLayout(form)
 
         # --- 字段映射表（标签 → 取值位置） ---
-        self.fields_box = QGroupBox("字段映射（标签 → 取值位置，可直接改行/列）")
+        self.fields_box = QGroupBox("字段映射")
+        self.fields_box.setToolTip("标签 → 取值位置，可直接改行/列")
         fields_layout = QVBoxLayout(self.fields_box)
         self.fields_table = _FieldsTable(0, 5)
         self.fields_table.setObjectName("fieldsTable")
@@ -236,7 +253,9 @@ class ConfigPanel(QWidget):
         fields_layout.addLayout(fbtns2)
         cfg_layout.addWidget(self.fields_box)
 
+        # 「当前结果表配置」（含字段映射）在上，「结果表」选择列表在下。
         root.addWidget(cfg_box)
+        root.addWidget(tables_box)
         root.addStretch(1)
 
     # ------------------------------------------------------------------
@@ -272,6 +291,37 @@ class ConfigPanel(QWidget):
     def active_fields(self) -> list[FieldMapping]:
         """当前结果表的全部候选字段（含未勾选），供坐标对齐取标签锚点。"""
         return list(self._form_fields)
+
+    def current_output_table(self) -> OutputTable | None:
+        """当前选中的结果表（先同步字段表，使 fields 反映最新勾选）。"""
+        row = self.table_list.currentRow()
+        if not (0 <= row < len(self._tables)):
+            return None
+        self._read_fields_table()
+        return self._tables[row]
+
+    def set_current_validations(self, rules: list[ValidationRule]):
+        """保存当前结果表的校验规则。"""
+        row = self.table_list.currentRow()
+        if not (0 <= row < len(self._tables)):
+            return
+        self._tables[row].validations = [
+            self._clone_rule(r) for r in rules]
+        self._on_edit()
+
+    def set_current_analysis(self, derived: list[DerivedColumn],
+                             cleanup: CleanupSpec, group_by: GroupBySpec,
+                             stats: StatsSpec):
+        """保存当前结果表的分析准备配置（派生列 / 清洗 / 分组汇总 / 统计）。"""
+        row = self.table_list.currentRow()
+        if not (0 <= row < len(self._tables)):
+            return
+        t = self._tables[row]
+        t.derived_columns = [clone_derived(d) for d in derived]
+        t.cleanup = clone_cleanup(cleanup)
+        t.group_by = clone_group_by(group_by)
+        t.stats = clone_stats(stats)
+        self._on_edit()
 
     def _on_field_selected(self, row: int, _col: int,
                            _prev_row: int, _prev_col: int):
@@ -320,12 +370,23 @@ class ConfigPanel(QWidget):
                             label_row=f.label_row, label_col=f.label_col,
                             value_row=f.value_row, value_col=f.value_col)
 
+    @staticmethod
+    def _clone_rule(r: ValidationRule) -> ValidationRule:
+        return ValidationRule(type=r.type, columns=list(r.columns),
+                              target=r.target, min=r.min, max=r.max,
+                              tolerance=r.tolerance)
+
     @classmethod
     def _clone_table(cls, t: OutputTable) -> OutputTable:
         return OutputTable(
             name=t.name,
             sheet=SheetConfig(sheet_keyword=t.sheet.sheet_keyword),
             fields=[cls._clone_field(f) for f in t.fields],
+            validations=[cls._clone_rule(r) for r in t.validations],
+            derived_columns=[clone_derived(d) for d in t.derived_columns],
+            cleanup=clone_cleanup(t.cleanup),
+            group_by=clone_group_by(t.group_by),
+            stats=clone_stats(t.stats),
         )
 
     def _rebuild_table_list(self, select_row: int = 0):
